@@ -8,38 +8,71 @@ def extract_grammar(file_path):
     archivo.close()
     return [line for line in lines if line.strip() and not line.strip().startswith('/')]
 
-def explore_parse(input_str, grammar, tabla, start):
+def tokenize(input_str, terminales):
+    """Convert input string to tokens based on grammar terminals"""
+    tokens = []
+    i = 0
+    while i < len(input_str):
+        # Skip whitespace
+        if input_str[i].isspace():
+            i += 1
+            continue
+        
+        # Try to match the longest terminal first
+        matched = False
+        
+        # Sort terminals by length (longest first) to match the longest possible token
+        sorted_terms = sorted(terminales, key=len, reverse=True)
+        for term in sorted_terms:
+            if input_str[i:i+len(term)] == term:
+                tokens.append(term)
+                i += len(term)
+                matched = True
+                break
+        
+        # If no terminal matches, consider it a single character token
+        if not matched:
+            tokens.append(input_str[i])
+            i += 1
+    
+    return tokens
+
+def explore_parse(input_str, grammar, tabla, start, terminales):
     """Explore the parsing of an input string"""
-    cadena = input_str + "$"
+    # Tokenize the input string
+    tokens = tokenize(input_str, terminales)
+    tokens.append("$")  # Add end marker
+    
+    token_idx = 0
     pila = [start[0]]
     steps = []
     
     while True:
         pila_str = ' '.join(pila)
-        entrada_str = cadena
+        entrada_str = ' '.join(tokens[token_idx:])
         
-        if len(cadena) == 1 and len(pila) == 0:
+        if token_idx >= len(tokens) - 1 and len(pila) == 0:
             steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "CADENA VÁLIDA"})
             return True, steps
             
         if not pila:
-            if cadena != "$":
+            if token_idx < len(tokens) - 1:
                 steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "ERROR: Pila vacía pero entrada no completada"})
                 return False, steps
             else:
                 steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "CADENA VÁLIDA"})
                 return True, steps
                 
-        if len(cadena) == 0:
+        if token_idx >= len(tokens):
             steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "ERROR: Entrada vacía pero pila no completada"})
             return False, steps
             
         current = pila[-1]
-        symbol = cadena[0]
+        current_token = tokens[token_idx]
         
         if grammar[current]["tipo"] in ["I", "V"]:
-            if symbol in tabla[current] and tabla[current][symbol]:
-                produccion = tabla[current][symbol][0]
+            if current_token in tabla[current] and tabla[current][current_token]:
+                produccion = tabla[current][current_token][0]
                 pila.pop()
                 
                 # Handle empty string case
@@ -50,15 +83,15 @@ def explore_parse(input_str, grammar, tabla, start):
                 prod_str = produccion['Izq'] + ' -> ' + ' '.join(produccion['Der'])
                 steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"Aplicar regla: {prod_str}"})
             else:
-                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: No hay producción para {current} con {symbol}"})
+                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: No hay producción para {current} con {current_token}"})
                 return False, steps
         elif grammar[current]["tipo"] == "T":
-            if current == symbol:
+            if current == current_token:
                 pila.pop()
-                cadena = cadena[1:]
-                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"Match: {symbol}"})
+                token_idx += 1
+                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"Match: {current_token}"})
             else:
-                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: Se esperaba {current} pero se encontró {symbol}"})
+                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: Se esperaba {current} pero se encontró {current_token}"})
                 return False, steps
         else:
             steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: Símbolo {current} no reconocido"})
@@ -66,8 +99,6 @@ def explore_parse(input_str, grammar, tabla, start):
 
 # Main program
 grammar_lines = extract_grammar("grammar.txt")
-variables = []
-terminales = []
 epsilon = 'ε'  # We'll still use this internally, but recognize '' in the grammar
 
 # Parse the grammar
@@ -84,7 +115,9 @@ for line in grammar_lines:
         
     parts = line.split('->')
     var = parts[0].strip()
-    if var not in variables:
+    
+    # Don't add the start symbol to variables list to avoid duplication
+    if var not in variables and var not in start:
         variables.append(var)
     
     # Extract alternatives
@@ -327,7 +360,14 @@ for t in terminales + ["$"]:
 print()
 
 print("-" * (20 + 20 * len(terminales + ["$"])))
+
+# Use set to avoid duplicates when displaying
+displayed_symbols = []
 for nt in start + variables:
+    if nt in displayed_symbols:
+        continue
+    displayed_symbols.append(nt)
+    
     print(f"{nt:20}", end="")
     for t in terminales + ["$"]:
         producciones = tabla[nt][t]
@@ -344,7 +384,7 @@ input_text = code.readlines()[0].strip()
 code.close()
 
 print("\n\nANALISIS DE LA CADENA")
-success, steps = explore_parse(input_text, grammar, tabla, start)
+success, steps = explore_parse(input_text, grammar, tabla, start, terminales)
 
 # Print the parsing steps
 for step in steps:
