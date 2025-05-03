@@ -1,4 +1,5 @@
-S -> A B B C
-A -> a
-B -> b | c
-C -> d
+E -> T E'
+E' -> + T E' | ''
+T -> F T'
+T' -> * F T' | ''
+F -> ( E ) | id
