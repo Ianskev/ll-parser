@@ -1,0 +1,34 @@
+# Entorno virtual de Python
+.venv/
+
+# Archivos de entorno (contienen información sensible)
+.env
+
+# Cachés de Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+
+# Archivos de distribución
+dist/
+build/
+*.egg-info/
+
+# Configuraciones IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Archivos de log
+*.log
+ngrok.log
+
+# Otros
+.DS_Store
