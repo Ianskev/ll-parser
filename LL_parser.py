@@ -107,14 +107,6 @@ for line in grammar_lines:
                 i += 1
                 continue
                 
-            # Handle special characters
-            if alt[i] in '+-*/()':
-                if alt[i] not in terminales:
-                    terminales.append(alt[i])
-                symbols.append(alt[i])
-                i += 1
-                continue
-                
             # Handle variables with apostrophe (like E')
             if i+1 < len(alt) and alt[i+1] == "'":
                 symbol = alt[i:i+2]
@@ -122,6 +114,25 @@ for line in grammar_lines:
                     variables.append(symbol)
                 symbols.append(symbol)
                 i += 2
+                continue
+            
+            # General case: handle any multi-character terminal (sequence of lowercase letters)
+            if alt[i].islower():
+                start_pos = i
+                while i < len(alt) and alt[i].islower():
+                    i += 1
+                symbol = alt[start_pos:i]
+                if symbol not in terminales:
+                    terminales.append(symbol)
+                symbols.append(symbol)
+                continue
+            
+            # Handle special characters
+            if alt[i] in '+-*/()':
+                if alt[i] not in terminales:
+                    terminales.append(alt[i])
+                symbols.append(alt[i])
+                i += 1
                 continue
                 
             # Handle other symbols
