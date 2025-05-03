@@ -6,7 +6,7 @@ def extract_grammar(file_path):
     archivo = open(file_path, "r")
     lines = archivo.readlines()
     archivo.close()
-    return lines
+    return [line for line in lines if line.strip() and not line.strip().startswith('/')]
 
 def explore_parse(input_str, grammar, tabla, start):
     """Explore the parsing of an input string"""
@@ -68,7 +68,7 @@ def explore_parse(input_str, grammar, tabla, start):
 grammar_lines = extract_grammar("grammar.txt")
 variables = []
 terminales = []
-epsilon = 'ε'  # Symbol for empty string
+epsilon = 'ε'  # We'll still use this internally, but recognize '' in the grammar
 
 # Parse the grammar
 start = [grammar_lines[0].split('->')[0].strip()]
@@ -82,28 +82,32 @@ for line in grammar_lines:
     if not line or '->' not in line:
         continue
         
-    # Extract left side (variable)
-    var = line.split('->')[0].strip()
+    parts = line.split('->')
+    var = parts[0].strip()
     if var not in variables:
         variables.append(var)
     
-    # Extract right side and its terminals
-    right_side = line.split('->')[1].strip()
-    alternatives = right_side.split('|')
+    # Extract alternatives
+    right_side = parts[1].strip()
+    alternatives = [alt.strip() for alt in right_side.split('|')]
     
     for alt_idx, alt in enumerate(alternatives):
-        alt = alt.strip()
-        regla_id = f'rule_{line}_{alt_idx}'
-        symbols = []
+        regla_id = f'rule_{var}_{alt_idx}'
         
-        # Parse the alternative into symbols
+        # Handle empty string case
+        if alt == "''" or alt == '""' or alt == '':
+            reglas[regla_id] = {'Izq': var, 'Der': [epsilon]}
+            continue
+        
+        # Process multi-character symbols
         i = 0
+        symbols = []
         while i < len(alt):
             if alt[i].isspace():
                 i += 1
                 continue
                 
-            # Handle parentheses, operators, and other single-character terminals
+            # Handle special characters
             if alt[i] in '+-*/()':
                 if alt[i] not in terminales:
                     terminales.append(alt[i])
@@ -111,7 +115,7 @@ for line in grammar_lines:
                 i += 1
                 continue
                 
-            # Handle multi-character non-terminals (like E')
+            # Handle variables with apostrophe (like E')
             if i+1 < len(alt) and alt[i+1] == "'":
                 symbol = alt[i:i+2]
                 if symbol not in variables:
@@ -120,7 +124,7 @@ for line in grammar_lines:
                 i += 2
                 continue
                 
-            # Handle other symbols (variables or terminals)
+            # Handle other symbols
             symbol = alt[i]
             if symbol.isupper():
                 if symbol not in variables:
@@ -130,10 +134,6 @@ for line in grammar_lines:
                     terminales.append(symbol)
             symbols.append(symbol)
             i += 1
-            
-        # Handle empty alternative
-        if not symbols or alt == epsilon:
-            symbols = [epsilon]
             
         reglas[regla_id] = {'Izq': var, 'Der': symbols}
 
