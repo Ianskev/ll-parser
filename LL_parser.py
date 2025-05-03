@@ -1,6 +1,8 @@
 import re
 import json
 import io
+import graphviz
+import copy
 
 def extract_grammar(file_path):
     """Extract grammar rules from a file"""
@@ -51,25 +53,26 @@ def explore_parse(input_str, grammar, tabla, start, terminales):
     token_idx = 0
     pila = [start[0]]
     steps = []
+    parse_tree = []  # For building the parse tree
     
     while True:
         pila_str = ' '.join(pila)
         entrada_str = ' '.join(tokens[token_idx:])
         
         if token_idx >= len(tokens) - 1 and len(pila) == 0:
-            steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "CADENA VÁLIDA"})
+            steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "CADENA VÁLIDA", "production": None})
             return True, steps
             
         if not pila:
             if token_idx < len(tokens) - 1:
-                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "ERROR: Pila vacía pero entrada no completada"})
+                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "ERROR: Pila vacía pero entrada no completada", "production": None})
                 return False, steps
             else:
-                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "CADENA VÁLIDA"})
+                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "CADENA VÁLIDA", "production": None})
                 return True, steps
                 
         if token_idx >= len(tokens):
-            steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "ERROR: Entrada vacía pero pila no completada"})
+            steps.append({"pila": pila_str, "entrada": entrada_str, "accion": "ERROR: Entrada vacía pero pila no completada", "production": None})
             return False, steps
             
         current = pila[-1]
@@ -86,24 +89,201 @@ def explore_parse(input_str, grammar, tabla, start, terminales):
                 
                 # Create readable production string
                 prod_str = produccion['Izq'] + ' -> ' + ' '.join(produccion['Der'])
-                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"Aplicar regla: {prod_str}"})
+                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"Aplicar regla: {prod_str}", "production": produccion})
             else:
-                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: No hay producción para {current} con {current_token}"})
+                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: No hay producción para {current} con {current_token}", "production": None})
                 return False, steps
         elif grammar[current]["tipo"] == "T":
             if current == current_token:
                 pila.pop()
                 token_idx += 1
-                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"Match: {current_token}"})
+                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"Match: {current_token}", "production": None})
             else:
-                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: Se esperaba {current} pero se encontró {current_token}"})
+                steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: Se esperaba {current} pero se encontró {current_token}", "production": None})
                 return False, steps
         else:
-            steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: Símbolo {current} no reconocido"})
+            steps.append({"pila": pila_str, "entrada": entrada_str, "accion": f"ERROR: Símbolo {current} no reconocido", "production": None})
             return False, steps
 
+def eliminate_left_recursion(grammar_text):
+    """Eliminate left recursion from grammar"""
+    lines = grammar_text.strip().split('\n')
+    rules = {}
+    
+    # Parse the grammar
+    for line in lines:
+        if '->' not in line:
+            continue
+        left, right = line.split('->', 1)
+        non_terminal = left.strip()
+        productions = [p.strip() for p in right.split('|')]
+        if non_terminal not in rules:
+            rules[non_terminal] = []
+        rules[non_terminal].extend(productions)
+    
+    # Apply the algorithm to eliminate direct left recursion
+    new_rules = {}
+    for A, productions in rules.items():
+        alpha = []  # productions that start with A
+        beta = []   # productions that don't start with A
+        
+        for prod in productions:
+            prod_parts = prod.split()
+            if prod_parts and prod_parts[0] == A:
+                # This is a left recursive production
+                alpha.append(' '.join(prod_parts[1:]) if len(prod_parts) > 1 else 'ε')
+            else:
+                beta.append(prod)
+        
+        if alpha:  # If there's left recursion
+            A_prime = f"{A}'"
+            new_rules[A] = []
+            for b in beta:
+                if b:
+                    new_rules[A].append(f"{b} {A_prime}")
+                else:
+                    new_rules[A].append(A_prime)
+            
+            new_rules[A_prime] = []
+            for a in alpha:
+                if a != 'ε':
+                    new_rules[A_prime].append(f"{a} {A_prime}")
+            new_rules[A_prime].append('ε')
+        else:
+            new_rules[A] = productions
+    
+    # Convert back to grammar text
+    result = []
+    for non_terminal, productions in new_rules.items():
+        if productions:
+            result.append(f"{non_terminal} -> {' | '.join(productions)}")
+    
+    return '\n'.join(result)
+
+def left_factorization(grammar_text):
+    """Apply left factorization to grammar"""
+    lines = grammar_text.strip().split('\n')
+    rules = {}
+    
+    # Parse the grammar
+    for line in lines:
+        if '->' not in line:
+            continue
+        left, right = line.split('->', 1)
+        non_terminal = left.strip()
+        productions = [p.strip() for p in right.split('|')]
+        if non_terminal not in rules:
+            rules[non_terminal] = []
+        rules[non_terminal].extend(productions)
+    
+    # Apply left factorization
+    new_rules = {}
+    for A, productions in rules.items():
+        # Group productions by common prefix
+        while True:
+            # Find common prefixes
+            prefixes = {}
+            for prod in productions:
+                prod_parts = prod.split()
+                if not prod_parts:
+                    if '' not in prefixes:
+                        prefixes[''] = []
+                    prefixes[''].append(prod)
+                    continue
+                    
+                prefix = prod_parts[0]
+                if prefix not in prefixes:
+                    prefixes[prefix] = []
+                prefixes[prefix].append(prod)
+            
+            # Check if we need to factorize
+            factorize = False
+            for prefix, prods in prefixes.items():
+                if len(prods) > 1:
+                    factorize = True
+                    break
+            
+            if not factorize:
+                break
+                
+            # Apply factorization for the longest prefix
+            new_productions = []
+            for prefix, prods in list(prefixes.items()):
+                if len(prods) > 1:
+                    A_prime = f"{A}'"
+                    new_suffix = []
+                    
+                    for prod in prods:
+                        if prefix:
+                            suffix = prod[len(prefix):].strip()
+                            new_suffix.append(suffix if suffix else 'ε')
+                        else:
+                            new_suffix.append(prod)
+                    
+                    new_productions.append(f"{prefix} {A_prime}")
+                    
+                    if A_prime not in new_rules:
+                        new_rules[A_prime] = []
+                    new_rules[A_prime].extend(new_suffix)
+                    
+                    # Remove the factorized productions
+                    productions = [p for p in productions if p not in prods]
+                else:
+                    new_productions.extend(prods)
+            
+            productions = new_productions
+        
+        new_rules[A] = productions
+    
+    # Convert back to grammar text
+    result = []
+    for non_terminal, productions in new_rules.items():
+        if productions:
+            result.append(f"{non_terminal} -> {' | '.join(productions)}")
+    
+    return '\n'.join(result)
+
+def generate_parse_tree(parse_steps):
+    """Generate a visual parse tree using graphviz"""
+    dot = graphviz.Digraph(comment='Parse Tree')
+    dot.attr('node', shape='box', style='filled', color='lightblue')
+    
+    # Track nodes and relationships
+    nodes = {}
+    node_counter = 0
+    parent_stack = []
+    
+    # Initialize with the start symbol
+    for step in parse_steps:
+        if step['production']:
+            # This is a production rule application
+            left_side = step['production']['Izq']
+            right_side = step['production']['Der']
+            
+            # Add parent node if not exists
+            if left_side not in nodes:
+                node_id = f"node_{node_counter}"
+                nodes[left_side] = node_id
+                dot.node(node_id, left_side)
+                node_counter += 1
+            
+            parent_node = nodes[left_side]
+            
+            # Add child nodes
+            for symbol in right_side:
+                if symbol == 'eps':
+                    symbol = 'ε'
+                
+                child_id = f"node_{node_counter}"
+                dot.node(child_id, symbol)
+                dot.edge(parent_node, child_id)
+                nodes[symbol + str(node_counter)] = child_id  # Use unique key
+                node_counter += 1
+    
+    return dot
+
 # Main program
-def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"):
+def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt", return_steps=False):
     try:
         grammar_lines = extract_grammar(grammar_file)
         
@@ -410,6 +590,8 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
         
         output.write("\nResultado del análisis: " + ("ACEPTADA" if success else "RECHAZADA") + "\n")
         
+        if return_steps:
+            return output.getvalue(), steps
         return output.getvalue()
     except Exception as e:
         return f"Error en el análisis: {str(e)}\n{type(e).__name__}: {e}"

@@ -1,7 +1,9 @@
 import streamlit as st
 import tempfile
 import os
-from LL_parser import parse_grammar_and_analyze
+import base64
+from LL_parser import parse_grammar_and_analyze, eliminate_left_recursion, left_factorization, generate_parse_tree
+import graphviz
 
 def main():
     # Configuración de página con tema y estilo
@@ -23,7 +25,22 @@ def main():
     .highlight {background-color:#E3F2FD; padding:15px; border-radius:5px; margin:10px 0}
     .sidebar-title {font-size:24px; font-weight:bold; color:#283593; margin-bottom:20px}
     .sidebar-subtitle {font-size:18px; font-weight:bold; color:#455A64; margin-top:15px}
+    .virtual-key {display:inline-block; padding:8px 15px; margin:5px; background:#E3F2FD; cursor:pointer; border:1px solid #90CAF9; border-radius:4px;}
+    .virtual-key:hover {background:#BBDEFB;}
     </style>
+    <script>
+    function insertAtCursor(textarea, text) {
+        var textarea = document.getElementById(textarea);
+        if (!textarea) return;
+        
+        var startPos = textarea.selectionStart;
+        var endPos = textarea.selectionEnd;
+        textarea.value = textarea.value.substring(0, startPos) + text + textarea.value.substring(endPos, textarea.value.length);
+        textarea.selectionStart = startPos + text.length;
+        textarea.selectionEnd = startPos + text.length;
+        textarea.focus();
+    }
+    </script>
     """, unsafe_allow_html=True)
 
     # Encabezado principal
@@ -33,27 +50,82 @@ def main():
     # Sidebar con configuración
     st.sidebar.markdown('<p class="sidebar-title">Configuración</p>', unsafe_allow_html=True)
     
-    # Grammar input
+    # Grammar input options
     st.sidebar.markdown('<p class="sidebar-subtitle">Gramática</p>', unsafe_allow_html=True)
+    input_method = st.sidebar.radio("Método de entrada:", ["Editor de texto", "Subir archivo"])
+    
     default_grammar = """E -> T E'
 E' -> + T E' | ε
 T -> F T'
 T' -> * F T' | ε
 F -> ( E ) | id"""
     
-    grammar_text = st.sidebar.text_area("Ingrese su gramática:", value=default_grammar, height=200)
+    grammar_text = ""
+    if input_method == "Editor de texto":
+        grammar_text = st.sidebar.text_area("Ingrese su gramática:", value=default_grammar, height=200, key="grammar_editor")
+        
+        # Virtual keyboard for grammar symbols
+        st.sidebar.markdown('<p class="sidebar-subtitle">Teclado virtual para gramática</p>', unsafe_allow_html=True)
+        cols = st.sidebar.columns(4)
+        grammar_keys = ["ε", "->", "|", "+", "*", "(", ")", "id"]
+        for i, key in enumerate(grammar_keys):
+            col_idx = i % 4
+            with cols[col_idx]:
+                st.markdown(f"""
+                <div class="virtual-key" onclick="insertAtCursor('grammar_editor','{key}')">{key}</div>
+                """, unsafe_allow_html=True)
+    else:
+        uploaded_grammar = st.sidebar.file_uploader("Subir archivo de gramática (.txt)", type=["txt"])
+        if uploaded_grammar:
+            grammar_text = uploaded_grammar.getvalue().decode("utf-8")
+            st.sidebar.success(f"Archivo '{uploaded_grammar.name}' cargado correctamente")
     
-    # Sample inputs
+    # Grammar optimization options
+    st.sidebar.markdown('<p class="sidebar-subtitle">Optimización de Gramática</p>', unsafe_allow_html=True)
+    optimize_grammar = st.sidebar.checkbox("Optimizar gramática")
+    
+    if optimize_grammar:
+        optimize_options = st.sidebar.multiselect(
+            "Seleccione optimizaciones a aplicar:",
+            ["Eliminar recursividad por izquierda", "Factorización por izquierda"],
+            default=["Eliminar recursividad por izquierda"]
+        )
+    
+    # Input string options
     st.sidebar.markdown('<p class="sidebar-subtitle">Cadena de entrada</p>', unsafe_allow_html=True)
-    input_examples = {
-        "Ejemplo 1": "id + id * id",
-        "Ejemplo 2": "( id )",
-        "Ejemplo 3": "id + id + id",
-        "Ejemplo 4": "id * id * id"
-    }
+    input_string_method = st.sidebar.radio("Método de entrada para cadena:", ["Ejemplos predefinidos", "Entrada manual", "Subir archivo"])
+    
+    input_text = ""
+    if input_string_method == "Ejemplos predefinidos":
+        input_examples = {
+            "Ejemplo 1": "id + id * id",
+            "Ejemplo 2": "( id )",
+            "Ejemplo 3": "id + id + id",
+            "Ejemplo 4": "id * id * id"
+        }
+        selected_example = st.sidebar.selectbox("Seleccione un ejemplo:", list(input_examples.keys()))
+        input_text = input_examples[selected_example]
+    elif input_string_method == "Entrada manual":
+        input_text = st.sidebar.text_area("Ingrese la cadena de entrada:", height=80, key="input_editor")
+        
+        # Virtual keyboard for input
+        st.sidebar.markdown('<p class="sidebar-subtitle">Teclado virtual para entrada</p>', unsafe_allow_html=True)
+        cols = st.sidebar.columns(4)
+        input_keys = ["id", "+", "*", "(", ")"]
+        for i, key in enumerate(input_keys):
+            col_idx = i % 4
+            with cols[col_idx]:
+                st.markdown(f"""
+                <div class="virtual-key" onclick="insertAtCursor('input_editor','{key}')">{key}</div>
+                """, unsafe_allow_html=True)
+    else:
+        uploaded_input = st.sidebar.file_uploader("Subir archivo de entrada (.txt)", type=["txt"])
+        if uploaded_input:
+            input_text = uploaded_input.getvalue().decode("utf-8")
+            st.sidebar.success(f"Archivo '{uploaded_input.name}' cargado correctamente")
     
     # Contenido principal dividido en pestañas
-    tab1, tab2 = st.tabs(["Entrada y Análisis", "Ayuda"])
+    tab1, tab2, tab3 = st.tabs(["Entrada y Análisis", "Árbol de Derivación", "Ayuda"])
     
     with tab1:
         # Creamos dos columnas para organizar el contenido
@@ -62,22 +134,41 @@ F -> ( E ) | id"""
         with col1:
             st.markdown('<p class="medium-font">Gramática Ingresada</p>', unsafe_allow_html=True)
             with st.container():
-                st.code(grammar_text)
+                if grammar_text:
+                    st.code(grammar_text)
+                else:
+                    st.warning("Por favor ingrese una gramática o cargue un archivo")
             
             st.markdown('<p class="medium-font">Cadena de Entrada</p>', unsafe_allow_html=True)
-            selected_example = st.selectbox("Seleccione un ejemplo o escriba su propia cadena:", 
-                                          list(input_examples.keys()))
-            input_text = st.text_area("", value=input_examples[selected_example], height=80)
+            with st.container():
+                if input_text:
+                    st.code(input_text)
+                else:
+                    st.warning("Por favor ingrese una cadena de entrada o cargue un archivo")
             
             analyze_btn = st.button("Analizar Sintácticamente", 
-                                  type="primary")
+                                  type="primary",
+                                  disabled=not (grammar_text and input_text))
         
         with col2:
-            if analyze_btn:
+            if analyze_btn and grammar_text and input_text:
                 try:
+                    # Aplicar optimizaciones si están activadas
+                    optimized_grammar = grammar_text
+                    if optimize_grammar:
+                        if "Eliminar recursividad por izquierda" in optimize_options:
+                            optimized_grammar = eliminate_left_recursion(optimized_grammar)
+                            st.success("✅ Recursividad por izquierda eliminada")
+                        if "Factorización por izquierda" in optimize_options:
+                            optimized_grammar = left_factorization(optimized_grammar)
+                            st.success("✅ Factorización por izquierda aplicada")
+                        
+                        st.markdown('<p class="medium-font">Gramática Optimizada</p>', unsafe_allow_html=True)
+                        st.code(optimized_grammar)
+                    
                     # Crear archivos temporales para la gramática y la entrada
                     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as f:
-                        safe_grammar = grammar_text.replace('ε', 'eps')
+                        safe_grammar = optimized_grammar.replace('ε', 'eps') if optimize_grammar else grammar_text.replace('ε', 'eps')
                         f.write(safe_grammar)
                         grammar_file = f.name
                         
@@ -87,7 +178,7 @@ F -> ( E ) | id"""
                     
                     with st.spinner('Analizando gramática y cadena de entrada...'):
                         # Ejecutar análisis
-                        result = parse_grammar_and_analyze(grammar_file, input_file)
+                        result, parse_steps = parse_grammar_and_analyze(grammar_file, input_file, return_steps=True)
                     
                     st.markdown('<p class="result-header">Resultado del Análisis</p>', unsafe_allow_html=True)
                     
@@ -108,6 +199,13 @@ F -> ( E ) | id"""
                         mime="text/plain",
                     )
                     
+                    # Guardar los pasos de análisis para el árbol de derivación
+                    if "ACEPTADA" in result:
+                        st.session_state.parse_steps = parse_steps
+                        st.session_state.input_text = input_text
+                        st.session_state.grammar_text = grammar_text
+                        st.info("👉 Vaya a la pestaña 'Árbol de Derivación' para ver la representación visual del análisis")
+                    
                     # Limpiar archivos temporales
                     os.unlink(grammar_file)
                     os.unlink(input_file)
@@ -121,6 +219,42 @@ F -> ( E ) | id"""
                              caption="Ejemplo de Análisis Sintáctico LL(1)", width=400)
     
     with tab2:
+        st.markdown('<p class="medium-font">Árbol de Derivación</p>', unsafe_allow_html=True)
+        
+        if 'parse_steps' in st.session_state and st.session_state.parse_steps:
+            try:
+                with st.spinner('Generando árbol de derivación...'):
+                    # Create parse tree visualization
+                    dot = generate_parse_tree(st.session_state.parse_steps)
+                    
+                    # Render the parse tree
+                    st.graphviz_chart(dot)
+                    
+                    # Provide download option for the tree
+                    def get_graphviz_html():
+                        return f"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <title>Árbol de Derivación</title>
+                        </head>
+                        <body>
+                            {dot.pipe().decode('utf-8')}
+                        </body>
+                        </html>
+                        """
+                        
+                    html_bytes = get_graphviz_html().encode()
+                    b64 = base64.b64encode(html_bytes).decode()
+                    
+                    href = f'<a href="data:text/html;base64,{b64}" download="arbol_derivacion.html">Descargar Árbol HTML</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Error al generar el árbol de derivación: {str(e)}")
+        else:
+            st.info("Realice un análisis exitoso en la pestaña 'Entrada y Análisis' para visualizar el árbol de derivación.")
+    
+    with tab3:
         st.markdown('<p class="medium-font">Guía del Analizador LL(1)</p>', unsafe_allow_html=True)
         with st.expander("¿Cómo ingresar una gramática?", expanded=True):
             st.markdown("""
@@ -146,6 +280,25 @@ B -> b B | ε
 C -> c C | ε
             """)
         
+        with st.expander("Optimización de gramáticas"):
+            st.markdown("""
+            **Eliminación de recursividad por izquierda:**
+            - Transforma reglas recursivas por izquierda en reglas equivalentes no recursivas
+            - Ejemplo: `A -> A α | β` se convierte en:
+              ```
+              A -> β A'
+              A' -> α A' | ε
+              ```
+            
+            **Factorización por izquierda:**
+            - Refactoriza reglas con prefijos comunes para facilitar decisiones deterministas
+            - Ejemplo: `A -> α β | α γ` se convierte en:
+              ```
+              A -> α A'
+              A' -> β | γ
+              ```
+            """)
+        
         with st.expander("Sobre el análisis LL(1)"):
             st.markdown("""
             El análisis LL(1) es un método de análisis sintáctico predictivo que construye el árbol 
@@ -157,6 +310,7 @@ C -> c C | ε
             - Cálculo de conjuntos FIRST y FOLLOW
             - Construcción de tabla de análisis LL(1)
             - Análisis de cadenas mediante algoritmo predictivo
+            - Visualización del árbol de derivación
             """)
 
 if __name__ == "__main__":
