@@ -103,6 +103,7 @@ epsilon = 'ε'  # We'll still use this internally, but recognize '' in the gramm
 
 # Parse the grammar
 start = [grammar_lines[0].split('->')[0].strip()]
+
 reglas = {}
 variables = []
 terminales = []
@@ -119,7 +120,6 @@ for line in grammar_lines:
     # Don't add the start symbol to variables list to avoid duplication
     if var not in variables and var not in start:
         variables.append(var)
-    
     # Extract alternatives
     right_side = parts[1].strip()
     alternatives = [alt.strip() for alt in right_side.split('|')]
@@ -184,17 +184,17 @@ for line in grammar_lines:
 # Initialize grammar structure
 grammar = {}
 
+# First add start symbols to ensure they're in the grammar
+for s in start:
+    grammar[s] = {"tipo": "I", "first": [], "follow": ["$"], "nullable": False}
+    
+# Then add other variables
 for var in variables:
-    grammar[var] = {"tipo": "V", "first": [], "follow": [], "nullable": False}
+    if var not in grammar:  # Skip if already added (like start symbol)
+        grammar[var] = {"tipo": "V", "first": [], "follow": [], "nullable": False}
     
 for term in terminales:
     grammar[term] = {"tipo": "T", "first": [term], "nullable": False}
-
-# Set the start symbol
-for s in start:
-    if s in grammar:
-        grammar[s]["tipo"] = "I"
-        grammar[s]["follow"] = ["$"]
 
 if epsilon not in grammar:
     grammar[epsilon] = {"tipo": "E", "first": [], "nullable": True}
