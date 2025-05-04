@@ -18,8 +18,8 @@ Esta aplicación proporciona una interfaz gráfica interactiva para el análisis
 
 1. Clona este repositorio o descarga los archivos fuente:
    ```bash
-   git clone https://github.com/tu-usuario/ll1-parser.git
-   cd ll1-parser
+   git clone https://github.com/ianskev/ll-parser.git
+   cd ll-parser
    ```
 
 2. Crea y activa un entorno virtual de Python:
@@ -42,7 +42,7 @@ Esta aplicación proporciona una interfaz gráfica interactiva para el análisis
 
 Para iniciar la aplicación, ejecuta:
 ```bash
-python main.py
+python run_app.py
 ``` 
 La aplicación se abrirá automáticamente en tu navegador web predeterminado.
 
@@ -102,7 +102,6 @@ La aplicación se abrirá automáticamente en tu navegador web predeterminado.
 
 1. **Tabla de Símbolos**:
    - Símbolos no terminales.
-   - Indicador de anulabilidad.
    - Conjuntos FIRST y FOLLOW.
    - Codificación por colores.
 
@@ -139,36 +138,6 @@ La aplicación se abrirá automáticamente en tu navegador web predeterminado.
 - **Gramática recursiva por izquierda**:
   - Optimiza para convertirla en LL(1).
 
-## 💡 Consejos para uso efectivo
-
-- ✅ Verifica el formato de tu gramática antes de analizar.
-- 🔄 Aplica optimizaciones a gramáticas no LL(1).
-- 🔀 Combina eliminación de recursividad y factorización para casos complejos.
-- 🌳 Estudia el árbol de derivación para entender la estructura.
-- 📊 Revisa la tabla LL(1) para identificar conflictos.
-
-## ⚠️ Solución de problemas
-
-- ❌ **"La cadena fue rechazada"**:
-  - Verifica que la cadena y la gramática sean válidas.
-  - Aplica optimizaciones si es necesario.
-  - Revisa la tabla LL(1) para detectar celdas conflictivas.
-
-- ⚠️ **"No se pudo extraer la tabla"**:
-  - Asegúrate de que cada producción esté en una línea separada.
-  - Verifica la sintaxis de las reglas.
-
-- 🌳 **Problemas con la visualización**:
-  - Instala Graphviz para mejor calidad: `sudo apt install graphviz`.
-  - La alternativa con Matplotlib funciona sin instalaciones adicionales.
-
-## 📋 Limitaciones
-
-- ⌨️ El teclado virtual añade símbolos al final del texto.
-- 🧩 Gramáticas muy grandes o ambiguas pueden no ser compatibles con LL(1).
-- 💻 La aplicación está optimizada para gramáticas de tamaño moderado.
-
----
 
 *Desarrollado para el curso de Compiladores - UTEC*  
 *2025*  
