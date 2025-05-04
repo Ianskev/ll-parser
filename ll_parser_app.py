@@ -9,6 +9,8 @@ import pandas as pd
 import re
 from LL_parser import parse_grammar_and_analyze, eliminate_left_recursion, left_factorization, generate_parse_tree
 from typing import List, Dict, Any, Optional, Tuple
+import streamlit.components.v1 as components
+
 # Helper functions to parse the analysis output
 def parse_symbol_table(result_text):
     """Extract and parse the symbol table from the result text"""
@@ -554,8 +556,6 @@ T' -> * F T' | ε
 F -> ( E ) | id"""
     if 'input_text' not in st.session_state:
         st.session_state.input_text = "id + id * id"
-    if 'cursor_pos' not in st.session_state:
-        st.session_state.cursor_pos = 0
 
     # Configuración de página con tema y estilo
     st.set_page_config(
@@ -578,61 +578,11 @@ F -> ( E ) | id"""
     .sidebar-subtitle {font-size:18px; font-weight:bold; color:#455A64; margin-top:15px}
     button.keyboard-btn {margin: 2px; padding: 2px 8px;}
     </style>
-    
-    <script>
-    // Function to track cursor position in text area
-    document.addEventListener('DOMContentLoaded', function() {
-        setTimeout(function() {
-            const textareas = document.querySelectorAll('textarea');
-            textareas.forEach(function(textarea) {
-                if (textarea.labels && textarea.labels[0] && textarea.labels[0].innerText.includes('Ingrese su gramática')) {
-                    textarea.addEventListener('click', function(e) {
-                        const cursorPosition = textarea.selectionStart;
-                        window.parent.postMessage({
-                            type: 'cursor-position',
-                            position: cursorPosition
-                        }, '*');
-                    });
-                    
-                    textarea.addEventListener('keyup', function(e) {
-                        const cursorPosition = textarea.selectionStart;
-                        window.parent.postMessage({
-                            type: 'cursor-position',
-                            position: cursorPosition
-                        }, '*');
-                    });
-                }
-            });
-        }, 1000);
-    });
-    </script>
     """, unsafe_allow_html=True)
     
-    # Add Streamlit component to listen for messages from JavaScript
-    components_placeholder = st.empty()
-    components_placeholder.markdown("""
-    <script>
-    window.addEventListener('message', function(e) {
-        if (e.data.type === 'cursor-position') {
-            window.parent.postMessage({
-                type: 'streamlit:setComponentValue',
-                value: e.data.position
-            }, '*');
-        }
-    });
-    </script>
-    """, unsafe_allow_html=True)
-
-    # Helper function for virtual keyboard
+    # Helper function for virtual keyboard - simplify to append at the end
     def add_to_grammar(symbol):
-        if 'cursor_pos' in st.session_state and st.session_state.cursor_pos is not None:
-            current_text = st.session_state.grammar_text
-            cursor_pos = st.session_state.cursor_pos
-            # Insert the symbol at cursor position
-            new_text = current_text[:cursor_pos] + symbol + current_text[cursor_pos:]
-            st.session_state.grammar_text = new_text
-            # Update cursor position to after the inserted symbol
-            st.session_state.cursor_pos = cursor_pos + len(symbol)
+        st.session_state.grammar_text += symbol
 
     # Encabezado principal
     st.markdown('<p class="big-font">Analizador Sintáctico LL(1)</p>', unsafe_allow_html=True)
@@ -655,22 +605,24 @@ F -> ( E ) | id"""
             on_change=lambda: setattr(st.session_state, 'grammar_text', st.session_state.grammar_editor)
         )
         
-        # Virtual keyboard for grammar symbols
+        # Virtual keyboard for grammar symbols - without + and *
         st.sidebar.markdown('<p class="sidebar-subtitle">Teclado virtual para gramática</p>', unsafe_allow_html=True)
-        col1, col2 = st.sidebar.columns(2)
+        st.sidebar.caption("Los símbolos se agregarán al final del texto")
+        
+        col1, col2, col3 = st.sidebar.columns(3)
         with col1:
             st.button("ε", on_click=add_to_grammar, args=["ε"], key="eps_btn", use_container_width=True)
-            st.button("->", on_click=add_to_grammar, args=["->"], key="arrow_btn", use_container_width=True)
         with col2:
-            st.button("|", on_click=add_to_grammar, args=[" | "], key="or_btn", use_container_width=True)
-            st.button("id", on_click=add_to_grammar, args=["id"], key="id_btn", use_container_width=True)
-        
-        col3, col4 = st.sidebar.columns(2)
+            st.button("->", on_click=add_to_grammar, args=["->"], key="arrow_btn", use_container_width=True)
         with col3:
-            st.button("+", on_click=add_to_grammar, args=[" + "], key="plus_btn", use_container_width=True)
-            st.button("*", on_click=add_to_grammar, args=[" * "], key="star_btn", use_container_width=True)
+            st.button("|", on_click=add_to_grammar, args=[" | "], key="or_btn", use_container_width=True)
+        
+        col4, col5, col6 = st.sidebar.columns(3)
         with col4:
+            st.button("id", on_click=add_to_grammar, args=["id"], key="id_btn", use_container_width=True)
+        with col5:
             st.button("(", on_click=add_to_grammar, args=[" ( "], key="lparen_btn", use_container_width=True)
+        with col6:
             st.button(")", on_click=add_to_grammar, args=[" ) "], key="rparen_btn", use_container_width=True)
     else:
         uploaded_grammar = st.sidebar.file_uploader("Subir archivo de gramática (.txt)", type=["txt"])
