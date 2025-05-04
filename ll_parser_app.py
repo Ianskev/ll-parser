@@ -714,6 +714,18 @@ Pointer -> * id"""
     def add_to_optimization_grammar(symbol):
         st.session_state.optimization_grammar += symbol
 
+    # Add helper function for grammar download buttons
+    def add_grammar_download(original, optimized, filename="gramatica_optimizada.txt"):
+        """Add a download button for the optimized grammar if it's different from the original"""
+        if original.strip() != optimized.strip():
+            st.download_button(
+                label="📥 Descargar gramática optimizada",
+                data=optimized,
+                file_name=filename,
+                mime="text/plain",
+                help="Descargar la versión optimizada de la gramática"
+            )
+
     # Encabezado principal
     st.markdown('<p class="big-font">Analizador Sintáctico LL(1)</p>', unsafe_allow_html=True)
     st.markdown('Herramienta para análisis de gramáticas libres de contexto utilizando parsing LL(1)')
@@ -781,8 +793,8 @@ Pointer -> * id"""
             st.session_state.input_text = input_text
             st.sidebar.success(f"Archivo '{uploaded_input.name}' cargado correctamente")
     
-    # Contenido principal dividido en pestañas
-    tab1, tab2, tab3, tab4 = st.tabs(["Entrada y Análisis", "Optimizar Gramática", "Árbol de Derivación", "Ayuda"])
+    # Reorder tabs - Árbol de Derivación comes before Optimizar Gramática
+    tab1, tab3, tab2, tab4 = st.tabs(["Entrada y Análisis", "Árbol de Derivación", "Optimizar Gramática", "Ayuda"])
     
     with tab1:
         # Creamos dos columnas para organizar el contenido
@@ -829,21 +841,6 @@ Pointer -> * id"""
                         
                         st.error("❌ No se puede analizar una cadena con una gramática que no es LL(1)")
                         st.info("👉 Vaya a la pestaña 'Optimizar Gramática' para transformar su gramática a una forma compatible con LL(1)")
-                        
-                        # Add buttons for navigation to the Optimize tab
-                        optimize_col1, optimize_col2 = st.columns(2)
-                        with optimize_col1:
-                            st.button("Ir a Optimizar Gramática", on_click=lambda: None, key="goto_optimize_btn")
-                        with optimize_col2:
-                            if st.button("Más información", key="more_info_btn"):
-                                st.markdown("""
-                                **¿Por qué mi gramática no es LL(1)?**
-
-                                * **Recursividad por izquierda**: No puede haber producciones como `A → A α` donde A deriva a sí mismo como primer símbolo
-                                * **Ambigüedad de prefijos**: No puede haber producciones como `A → α β | α γ` con prefijos comunes
-                                
-                                La pestaña de optimización transformará automáticamente su gramática a formato LL(1).
-                                """)
                     
                     if should_continue_analysis:
                         # Proceed with analysis only if grammar is LL(1) compatible
@@ -997,6 +994,53 @@ Pointer -> * id"""
                     st.image("https://gramaticasformales.wordpress.com/wp-content/uploads/2010/12/6.png?w=640", 
                              caption="Ejemplo de Análisis Sintáctico LL(1)", width=400)
     
+    with tab3:
+        st.markdown('<p class="medium-font">Árbol de Derivación</p>', unsafe_allow_html=True)
+        
+        if 'parse_steps' in st.session_state and st.session_state.parse_steps:
+            try:
+                # Check if Graphviz is installed
+                graphviz_installed = shutil.which('dot') is not None
+                
+                if graphviz_installed:
+                    with st.spinner('Generando árbol de derivación con Graphviz...'):
+                        try:
+                            # Try to create the parse tree using Graphviz
+                            dot = generate_parse_tree(st.session_state.parse_steps)
+                            st.graphviz_chart(dot)
+                            
+                            # Provide download option for the tree
+                            def get_graphviz_html():
+                                return f"""
+                                <!DOCTYPE html>
+                                <html>
+                                <head>
+                                    <title>Árbol de Derivación</title>
+                                </head>
+                                <body>
+                                    {dot.pipe().decode('utf-8')}
+                                </body>
+                                </html>
+                                """
+                                
+                            html_bytes = get_graphviz_html().encode()
+                            b64 = base64.b64encode(html_bytes).decode()
+                            
+                            href = f'<a href="data:text/html;base64,{b64}" download="arbol_derivacion.html">Descargar Árbol HTML</a>'
+                            st.markdown(href, unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error(f"Error al generar el árbol con Graphviz: {str(e)}")
+                            # Fallback to alternative visualization
+                            create_fallback_tree_visualization(st.session_state.parse_steps)
+                else:
+                    # Use fallback visualization method
+                    create_fallback_tree_visualization(st.session_state.parse_steps)
+                    
+            except Exception as e:
+                st.error(f"Error al generar el árbol de derivación: {str(e)}")
+        else:
+            st.info("Realice un análisis exitoso en la pestaña 'Entrada y Análisis' para visualizar el árbol de derivación.")
+    
     with tab2:
         st.markdown('<p class="medium-font">Optimizar Gramática</p>', unsafe_allow_html=True)
         
@@ -1080,44 +1124,31 @@ Pointer -> * id"""
                         lr_grammar = eliminate_left_recursion(optimized_grammar)
                         with st.expander("Gramática sin recursividad por izquierda", expanded=True):
                             st.code(lr_grammar)
-                            copy_lr_btn = st.button("Usar esta gramática", key="use_lr_grammar")
-                            if copy_lr_btn:
-                                st.session_state.grammar_text = lr_grammar
-                                st.success("✅ Gramática copiada a la pestaña de Análisis")
-                        
+                            # Add download button only if grammar was actually changed
+                            add_grammar_download(optimized_grammar, lr_grammar, "gramatica_sin_recursion.txt")
                         optimized_grammar = lr_grammar
                     
                     if needs_factorization:
                         lf_grammar = left_factorization(optimized_grammar)
                         with st.expander("Gramática con factorización por izquierda", expanded=True):
                             st.code(lf_grammar)
-                            copy_lf_btn = st.button("Usar esta gramática", key="use_lf_grammar")
-                            if copy_lf_btn:
-                                st.session_state.grammar_text = lf_grammar
-                                st.success("✅ Gramática copiada a la pestaña de Análisis")
-                        
+                            # Add download button only if grammar was actually changed
+                            add_grammar_download(optimized_grammar, lf_grammar, "gramatica_factorizada.txt")
                         optimized_grammar = lf_grammar
                     
                     # Final optimized grammar if both transformations were applied
                     if has_left_recursion and needs_factorization:
                         with st.expander("Gramática completamente optimizada para LL(1)", expanded=True):
                             st.code(optimized_grammar)
-                            copy_opt_btn = st.button("Usar esta gramática", key="use_opt_grammar")
-                            if copy_opt_btn:
-                                st.session_state.grammar_text = optimized_grammar
-                                st.success("✅ Gramática copiada a la pestaña de Análisis")
+                            # Add download button for final optimized grammar
+                            add_grammar_download(optimization_grammar, optimized_grammar, "gramatica_ll1_completa.txt")
                     
-                    st.info("👈 Use los botones 'Usar esta gramática' para copiarla a la pestaña de Análisis")
+                    st.info("Para usar esta gramática, cópiela y péguela en la pestaña 'Entrada y Análisis'")
                 
-                st.markdown("#### ¿Siguiente paso?")
+                # No need for "siguiente paso" info if grammar is already LL(1)
                 if is_ll1_compatible:
+                    st.markdown("#### ¿Siguiente paso?")
                     st.success("La gramática ya es compatible con LL(1). Puede usarla directamente en la pestaña de Análisis.")
-                    copy_curr_btn = st.button("Usar gramática actual", key="use_current_grammar")
-                    if copy_curr_btn:
-                        st.session_state.grammar_text = optimization_grammar
-                        st.success("✅ Gramática copiada a la pestaña de Análisis")
-                else:
-                    st.info("Seleccione una de las gramáticas optimizadas para continuar con el análisis.")
             else:
                 st.info("👈 Ingrese una gramática para analizarla y optimizarla automáticamente")
                 
@@ -1143,53 +1174,6 @@ E -> E + T | T
 E -> T E'
 E' -> + T E' | ε
                     """)
-    
-    with tab3:
-        st.markdown('<p class="medium-font">Árbol de Derivación</p>', unsafe_allow_html=True)
-        
-        if 'parse_steps' in st.session_state and st.session_state.parse_steps:
-            try:
-                # Check if Graphviz is installed
-                graphviz_installed = shutil.which('dot') is not None
-                
-                if graphviz_installed:
-                    with st.spinner('Generando árbol de derivación con Graphviz...'):
-                        try:
-                            # Try to create the parse tree using Graphviz
-                            dot = generate_parse_tree(st.session_state.parse_steps)
-                            st.graphviz_chart(dot)
-                            
-                            # Provide download option for the tree
-                            def get_graphviz_html():
-                                return f"""
-                                <!DOCTYPE html>
-                                <html>
-                                <head>
-                                    <title>Árbol de Derivación</title>
-                                </head>
-                                <body>
-                                    {dot.pipe().decode('utf-8')}
-                                </body>
-                                </html>
-                                """
-                                
-                            html_bytes = get_graphviz_html().encode()
-                            b64 = base64.b64encode(html_bytes).decode()
-                            
-                            href = f'<a href="data:text/html;base64,{b64}" download="arbol_derivacion.html">Descargar Árbol HTML</a>'
-                            st.markdown(href, unsafe_allow_html=True)
-                        except Exception as e:
-                            st.error(f"Error al generar el árbol con Graphviz: {str(e)}")
-                            # Fallback to alternative visualization
-                            create_fallback_tree_visualization(st.session_state.parse_steps)
-                else:
-                    # Use fallback visualization method
-                    create_fallback_tree_visualization(st.session_state.parse_steps)
-                    
-            except Exception as e:
-                st.error(f"Error al generar el árbol de derivación: {str(e)}")
-        else:
-            st.info("Realice un análisis exitoso en la pestaña 'Entrada y Análisis' para visualizar el árbol de derivación.")
     
     with tab4:
         st.markdown('<p class="medium-font">Guía del Analizador LL(1)</p>', unsafe_allow_html=True)

@@ -1,1 +1,1 @@
-id + id * id
+struct id { int id ; struct id id ; * id id }
