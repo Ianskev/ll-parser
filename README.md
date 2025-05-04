@@ -37,7 +37,10 @@ Esta aplicación proporciona una interfaz gráfica interactiva para el análisis
    ```bash
    pip install -r requirements.txt
    ```
-
+4. Crear un .env y colocar nuestro ngrok AuthToken
+   ```bash
+   NGROK_AUTH_TOKEN=
+   ```
 ## 🏁 Ejecución
 
 Para iniciar la aplicación, ejecuta:
