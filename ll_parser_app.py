@@ -470,10 +470,7 @@ def create_fallback_tree_visualization(parse_steps: List[Dict[str, Any]]):
     try:
         # Intentar usar el algoritmo de graphviz a través de pygraphviz
         pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
-        st.info("Layout generado con algoritmo de Graphviz - layout jerárquico.")
     except:
-        # Si falla, crear un layout personalizado para asegurar la jerarquía
-        st.warning("Usando layout jerárquico personalizado (sin Graphviz).")
         
         # Función para crear un layout jerárquico personalizado
         def hierarchical_pos(G, root=None, width=1., vert_gap=0.4, vert_loc=0, xcenter=0.5):
@@ -871,29 +868,12 @@ F -> ( E ) | id"""
                             st.markdown(href, unsafe_allow_html=True)
                         except Exception as e:
                             st.error(f"Error al generar el árbol con Graphviz: {str(e)}")
-                            st.warning("Usando visualización alternativa del árbol...")
                             # Fallback to alternative visualization
                             create_fallback_tree_visualization(st.session_state.parse_steps)
                 else:
-                    st.warning("⚠️ Graphviz no está instalado o no se encuentra en el PATH del sistema.")
-                    st.info("Usando visualización alternativa del árbol...")
                     # Use fallback visualization method
                     create_fallback_tree_visualization(st.session_state.parse_steps)
                     
-                    # Installation instruction for Graphviz
-                    with st.expander("Instrucciones para instalar Graphviz"):
-                        st.markdown("""
-                        Para una mejor visualización del árbol de derivación, se recomienda instalar Graphviz:
-                        
-                        1. Descarga Graphviz desde [la página oficial](https://graphviz.org/download/)
-                        2. Durante la instalación, asegúrate de seleccionar la opción "Añadir Graphviz al PATH del sistema"
-                        3. Reinicia tu computadora después de la instalación
-                        
-                        Alternativamente, puedes instalarlo con:
-                        - Windows: `winget install graphviz` o `choco install graphviz`
-                        - macOS: `brew install graphviz`
-                        - Linux: `sudo apt-get install graphviz` o equivalente en tu distribución
-                        """)
             except Exception as e:
                 st.error(f"Error al generar el árbol de derivación: {str(e)}")
         else:
