@@ -245,70 +245,70 @@ def left_factorization(grammar_text):
 
 def generate_parse_tree(parse_steps):
     """Generate a visual parse tree using graphviz"""
-    dot = graphviz.Digraph(comment='Parse Tree')
+    # Create a new digraph
+    dot = graphviz.Digraph('Parse Tree', format='png')
     
-    # Set up graph attributes for a clean tree layout
-    dot.attr(rankdir='TB')  # Top to bottom layout
-    dot.attr('node', fontname='Arial', fontsize='12')
-    dot.attr('graph', nodesep='0.5', ranksep='0.5')
+    # Configure for a clean, hierarchical tree layout like in the image
+    dot.attr(rankdir='TB')  # Top to bottom
+    dot.attr('node', shape='box', style='solid', color='black', fontname='Arial')
+    dot.attr('edge', arrowhead='normal', color='black')
+    dot.attr('graph', ranksep='0.5', nodesep='0.5')
     
-    # Find the starting production
-    productions = [step for step in parse_steps if step.get('production')]
-    if not productions:
-        return dot
-        
-    # Track the nodes we've created and their relationships
-    nodes = {}  # Maps symbols to node IDs
+    # Add title
+    dot.attr(label='Visualización del Árbol Sintáctico', labelloc='t', fontsize='20')
+    
+    # Extract all the production rules applied
+    steps_with_productions = []
+    for step in parse_steps:
+        action = step.get('accion', '')
+        if action.startswith('Aplicar regla:'):
+            rule = action.replace('Aplicar regla: ', '')
+            left_side, right_side = rule.split('->')
+            steps_with_productions.append((left_side.strip(), right_side.strip()))
+    
+    # Initialize tracking variables
     node_counter = 0
+    node_map = {}  # Maps symbols to their node IDs
+    parent_stack = []
     
-    # Create the root node (first non-terminal)
-    root_symbol = productions[0]['production']['Izq']
-    root_id = str(node_counter)
-    dot.node(root_id, root_symbol, shape='circle', style='filled', fillcolor='lightblue')
-    nodes[root_symbol] = [root_id]  # A symbol can appear multiple times
-    node_counter += 1
+    # Process the first production to create the root
+    if steps_with_productions:
+        root_symbol = steps_with_productions[0][0]
+        root_id = str(node_counter)
+        node_counter += 1
+        dot.node(root_id, root_symbol)
+        parent_stack.append((root_id, root_symbol))
     
-    # For each production rule applied in order
-    for step in productions:
-        prod = step['production']
-        left_side = prod['Izq']
-        right_side = prod['Der']
+    # Process each production rule
+    for left_side, right_side in steps_with_productions:
+        # Find and remove the non-terminal being expanded from the stack
+        parent_id = None
+        parent_symbol = None
+        for idx in range(len(parent_stack) - 1, -1, -1):
+            if parent_stack[idx][1] == left_side:
+                parent_id, parent_symbol = parent_stack.pop(idx)
+                break
         
-        # Skip if we don't have a node for this non-terminal yet
-        if left_side not in nodes or not nodes[left_side]:
+        if parent_id is None:
+            # Skip this production if we can't find its parent
             continue
         
-        # Get the next node to expand (the leftmost occurrence of this non-terminal)
-        parent_id = nodes[left_side][0]
-        # Remove this node from the list as we're expanding it
-        nodes[left_side] = nodes[left_side][1:] if len(nodes[left_side]) > 1 else []
+        # Process the right side of the production
+        symbols = right_side.split()
+        if right_side == 'ε':  # Special case for epsilon
+            symbols = ['ε']
         
-        # Handle epsilon production specially
-        if len(right_side) == 1 and right_side[0] == 'eps':
-            eps_id = str(node_counter)
-            node_counter += 1
-            dot.node(eps_id, 'ε', shape='box', style='filled', fillcolor='#E8F8F5')
-            dot.edge(parent_id, eps_id)
-            continue
-            
-        # Create nodes for each symbol in right side
-        for symbol in right_side:
+        # Create nodes for all symbols on the right side
+        for symbol in symbols:
             child_id = str(node_counter)
             node_counter += 1
-            
-            # Style based on whether it's a terminal or non-terminal
-            if symbol.islower() or symbol in "+-*/()":  # Terminal
-                dot.node(child_id, symbol, shape='box', style='filled', fillcolor='#FADBD8')
-            else:  # Non-terminal
-                dot.node(child_id, symbol, shape='circle', style='filled', fillcolor='lightblue')
-                
-                # Add this non-terminal to our tracking list for future expansion
-                if symbol not in nodes:
-                    nodes[symbol] = []
-                nodes[symbol].append(child_id)
-            
-            # Connect parent to child
+            dot.node(child_id, symbol)
             dot.edge(parent_id, child_id)
+            
+            # If this is a non-terminal, add it to the stack for future expansion
+            # Consider both uppercase symbols and those with apostrophes (like E')
+            if symbol[0].isupper() or "'" in symbol:
+                parent_stack.append((child_id, symbol))
     
     return dot
 

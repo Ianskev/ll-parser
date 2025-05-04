@@ -368,129 +368,130 @@ C -> c C | ε
             """)
 
 def create_fallback_tree_visualization(parse_steps):
-    """Create a simple parse tree visualization using matplotlib when Graphviz is not available"""
-    productions = [step for step in parse_steps if step.get('production')]
+    """Create a hierarchical tree visualization using matplotlib and networkx"""
+    # Extract production rules from parse steps
+    productions = [step for step in parse_steps if step.get("accion", "").startswith("Aplicar regla:")]
     
     if not productions:
         st.warning("No hay suficientes datos para generar el árbol de derivación.")
         return
     
-    try:
-        # Create a directed graph
-        G = nx.DiGraph()
+    # Create a directed graph
+    G = nx.DiGraph()
+    
+    # Track node positions and levels
+    node_map = {}  # Maps symbols to node IDs
+    node_counter = 0
+    parent_stack = []
+    
+    # First pass: Create the root node
+    first_step = productions[0]
+    rule = first_step["accion"].replace("Aplicar regla: ", "")
+    left, right = rule.split("->")
+    root_symbol = left.strip()
+    
+    # Add root node
+    root_id = f"node_{node_counter}"
+    node_counter += 1
+    G.add_node(root_id, label=root_symbol)
+    node_map[root_symbol] = [root_id]  # Use a list to track multiple instances
+    parent_stack.append((root_id, root_symbol))
+    
+    # Process each production rule to build the tree
+    for step in productions:
+        action = step["accion"]
+        rule = action.replace("Aplicar regla: ", "")
+        left, right = rule.split("->")
+        left = left.strip()
+        right = right.strip()
         
-        # Track nodes and relationships
-        nodes = {}
-        node_counter = 0
-        root_node = None
-        
-        # First pass: identify all nodes
-        for step in productions:
-            prod = step.get('production')
-            if prod:
-                left_side = prod['Izq']
-                right_side = prod['Der']
+        # Find the parent node for this production
+        parent_id = None
+        for i in range(len(parent_stack)-1, -1, -1):
+            if parent_stack[i][1] == left:
+                parent_id = parent_stack[i][0]
+                parent_stack.pop(i)
+                break
                 
-                # Add parent node if not exists
-                if left_side not in nodes:
-                    node_id = f"{left_side}_{node_counter}"
-                    nodes[left_side] = node_id
-                    G.add_node(node_id, label=left_side)
-                    if root_node is None:  # First node becomes root
-                        root_node = node_id
-                    node_counter += 1
-                
-                # Add child nodes
-                for symbol in right_side:
-                    symbol_key = f"{symbol}_{node_counter}"
-                    if symbol == 'eps':
-                        symbol_display = 'ε'
-                    else:
-                        symbol_display = symbol
-                    
-                    G.add_node(symbol_key, label=symbol_display)
-                    G.add_edge(nodes[left_side], symbol_key)
-                    nodes[symbol + str(node_counter)] = symbol_key
-                    node_counter += 1
-        
-        # Draw the graph with a pure networkx layout
-        plt.figure(figsize=(12, 8))
-        
-        try:
-            # Try hierarchical layout first (best for trees)
-            pos = nx.drawing.nx_agraph.graphviz_layout(G, prog="dot")
-        except (ImportError, Exception):
-            try:
-                # Try Kamada-Kawai layout as first fallback (often good for trees)
-                pos = nx.kamada_kawai_layout(G)
-            except Exception:
-                # Use spring layout as final fallback (works in all NetworkX installations)
-                pos = nx.spring_layout(G, k=0.8, iterations=100)
-        
-        # Draw nodes with labels
-        nx.draw(G, pos, with_labels=False, node_color='lightblue', 
-                node_size=700, arrows=True, edge_color='black', arrowsize=20)
-        
-        # Add node labels
-        labels = {node: G.nodes[node]['label'] for node in G.nodes()}
-        nx.draw_networkx_labels(G, pos, labels=labels, font_size=10)
-        
-        plt.title("Árbol de Derivación")
-        plt.axis('off')
-        
-        # Display in Streamlit
-        st.pyplot(plt)
-        
-        st.caption("Nota: Esta es una visualización simplificada. Para mejor calidad, instala Graphviz.")
-        
-        # Provide installation instructions for all required packages
-        with st.expander("Solucionar problemas de visualización"):
-            st.markdown("""
-            Para una óptima visualización del árbol de derivación, instale los siguientes paquetes:
-
-            ```bash
-            pip install graphviz pygraphviz matplotlib networkx
-            ```
+        if parent_id is None:
+            continue  # Skip if we can't find the parent
             
-            En algunos sistemas también necesitará instalar Graphviz como programa:
-            
-            - **Windows**: 
-              - Descarga desde [graphviz.org](https://graphviz.org/download/) 
-              - O usa: `winget install graphviz`
-            
-            - **macOS**: 
-              - `brew install graphviz`
-            
-            - **Linux**: 
-              - `sudo apt-get install graphviz libgraphviz-dev pkg-config`
-            
-            Después de la instalación, reinicie la aplicación.
-            """)
-    except Exception as e:
-        st.error(f"Error al generar la visualización alternativa: {str(e)}")
-        
-        # Mostrar instrucciones para solucionar el problema
-        st.markdown("""
-        ### Visualización básica de la derivación
-        
-        No se pudo generar una visualización gráfica del árbol debido a limitaciones de dependencias.
-        A continuación se muestra una representación textual de las derivaciones:
-        """)
-        
-        # Create a simple text-based representation
-        prod_table = []
-        for step in productions:
-            prod = step.get('production')
-            if prod:
-                left_side = prod['Izq']
-                right_side = ' '.join(prod['Der']).replace('eps', 'ε')
-                prod_table.append({"No terminal": left_side, "Derivación": f"{left_side} → {right_side}"})
-        
-        # Display as a table
-        if prod_table:
-            st.table(prod_table)
+        # Add child nodes
+        if right == "ε":  # Handle epsilon
+            child_id = f"node_{node_counter}"
+            node_counter += 1
+            G.add_node(child_id, label="ε")
+            G.add_edge(parent_id, child_id)
         else:
-            st.write("No hay información de derivación disponible.")
+            right_symbols = right.split()
+            for symbol in right_symbols:
+                child_id = f"node_{node_counter}"
+                node_counter += 1
+                G.add_node(child_id, label=symbol)
+                G.add_edge(parent_id, child_id)
+                
+                # If this is a non-terminal, add it to stack
+                if symbol[0].isupper() or "'" in symbol:
+                    if symbol not in node_map:
+                        node_map[symbol] = []
+                    node_map[symbol].append(child_id)
+                    parent_stack.append((child_id, symbol))
+    
+    # Create the visualization with a hierarchical layout
+    plt.figure(figsize=(12, 10))
+    plt.title("Árbol de Derivación", fontsize=16)
+    
+    # Use a hierarchical layout
+    try:
+        pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
+    except:
+        # Fallback to a simple level layout
+        pos = {}
+        
+        def assign_pos(node_id, level=0, pos_dict=None, horizontal_positions=None):
+            if pos_dict is None:
+                pos_dict = {}
+            if horizontal_positions is None:
+                horizontal_positions = {}
+            
+            if level not in horizontal_positions:
+                horizontal_positions[level] = 0
+            
+            # Assign horizontal position for this node
+            h_pos = horizontal_positions[level]
+            pos_dict[node_id] = (h_pos, -level)  # Negative level to go top-down
+            horizontal_positions[level] += 1
+            
+            # Process children
+            children = list(G.successors(node_id))
+            for child in children:
+                assign_pos(child, level+1, pos_dict, horizontal_positions)
+            
+            return pos_dict
+        
+        # Start positioning from the root
+        root = list(G.nodes())[0]  # First node should be root
+        pos = assign_pos(root)
+    
+    # Draw nodes with background color
+    nx.draw_networkx_nodes(G, pos, node_size=2000, node_color='lightblue', 
+                          edgecolors='black', alpha=0.8)
+    
+    # Draw node labels
+    labels = {node: G.nodes[node]['label'] for node in G.nodes()}
+    nx.draw_networkx_labels(G, pos, labels=labels, font_size=12, font_weight='bold')
+    
+    # Draw edges with arrows
+    nx.draw_networkx_edges(G, pos, arrows=True, arrowsize=20, 
+                          width=1.5, edge_color='black',
+                          connectionstyle='arc3,rad=0.1')
+    
+    # Remove axes and display the result
+    plt.axis('off')
+    st.pyplot(plt)
+    
+    # Show caption
+    st.caption("Visualización jerárquica del árbol de derivación")
 
 if __name__ == "__main__":
     main()
