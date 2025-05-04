@@ -673,8 +673,7 @@ def main():
     if 'grammar_text' not in st.session_state:
         st.session_state.grammar_text = """Struct -> struct Nombre { Comps }
 Nombre -> id
-Comps -> Comp Comps'
-Comps' -> ; Comp Comps' | ε
+Comps -> Comps ; Comp | Comp
 Comp -> Type id
 Type -> Typep | struct id | Pointer
 Typep -> int | char | bool | float
@@ -996,6 +995,9 @@ Pointer -> * id"""
     
     with tab3:
         st.markdown('<p class="medium-font">Árbol de Derivación</p>', unsafe_allow_html=True)
+        
+        # Add warning about potential overlapping in large grammar visualizations
+        st.warning("⚠️ Nota: Para gramáticas complejas con muchos nodos, la visualización del árbol puede presentar solapamientos. Esta limitación será mejorada en próximas actualizaciones.")
         
         if 'parse_steps' in st.session_state and st.session_state.parse_steps:
             try:
