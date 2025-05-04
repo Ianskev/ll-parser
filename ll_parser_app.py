@@ -616,13 +616,16 @@ def create_fallback_tree_visualization(parse_steps: List[Dict[str, Any]]):
 def main():
     # Setup session state to store editor content
     if 'grammar_text' not in st.session_state:
-        st.session_state.grammar_text = """E -> T E'
-E' -> + T E' | ε
-T -> F T'
-T' -> * F T' | ε
-F -> ( E ) | id"""
+        st.session_state.grammar_text = """Struct -> struct Nombre { Comps }
+Nombre -> id
+Comps -> Comp Comps'
+Comps' -> ; Comp Comps' | ε
+Comp -> Type id
+Type -> Typep | struct id | Pointer
+Typep -> int | char | bool | float
+Pointer -> * id"""
     if 'input_text' not in st.session_state:
-        st.session_state.input_text = "id + id * id"
+        st.session_state.input_text = "struct id { int id ; struct id id ; * id id }"
 
     # Configuración de página con tema y estilo
     st.set_page_config(
