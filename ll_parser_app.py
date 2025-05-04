@@ -368,7 +368,7 @@ C -> c C | ε
             """)
 
 def create_fallback_tree_visualization(parse_steps):
-    """Create a hierarchical tree visualization using matplotlib and networkx"""
+    """Create a proper hierarchical tree visualization similar to the image shown"""
     # Extract production rules from parse steps
     productions = [step for step in parse_steps if step.get("accion", "").startswith("Aplicar regla:")]
     
@@ -379,119 +379,118 @@ def create_fallback_tree_visualization(parse_steps):
     # Create a directed graph
     G = nx.DiGraph()
     
-    # Track node positions and levels
-    node_map = {}  # Maps symbols to node IDs
+    # Get the start symbol from the first production
+    first_rule = productions[0]["accion"].replace("Aplicar regla: ", "")
+    start_symbol, _ = first_rule.split("->")
+    start_symbol = start_symbol.strip()
+    
+    # Create tree structure with parent tracking
+    used_symbols = set()  # Track symbols already used in the tree
+    parent_map = {}  # Track parent relationships
+    symbol_nodes = {}  # Map symbols to node IDs
     node_counter = 0
     parent_stack = []
     
-    # First pass: Create the root node
-    first_step = productions[0]
-    rule = first_step["accion"].replace("Aplicar regla: ", "")
-    left, right = rule.split("->")
-    root_symbol = left.strip()
-    
-    # Add root node
+    # Start with the root node
     root_id = f"node_{node_counter}"
+    G.add_node(root_id, label=start_symbol)
+    symbol_nodes[start_symbol] = [root_id]
+    parent_stack.append((root_id, start_symbol))
     node_counter += 1
-    G.add_node(root_id, label=root_symbol)
-    node_map[root_symbol] = [root_id]  # Use a list to track multiple instances
-    parent_stack.append((root_id, root_symbol))
     
-    # Process each production rule to build the tree
+    # Process each production rule
     for step in productions:
-        action = step["accion"]
-        rule = action.replace("Aplicar regla: ", "")
+        rule = step["accion"].replace("Aplicar regla: ", "")
         left, right = rule.split("->")
         left = left.strip()
         right = right.strip()
         
-        # Find the parent node for this production
+        # Find the parent node for this expansion
         parent_id = None
-        for i in range(len(parent_stack)-1, -1, -1):
-            if parent_stack[i][1] == left:
-                parent_id = parent_stack[i][0]
-                parent_stack.pop(i)
+        parent_idx = -1
+        for idx, (node_id, symbol) in enumerate(parent_stack):
+            if symbol == left:
+                parent_id = node_id
+                parent_idx = idx
                 break
-                
-        if parent_id is None:
-            continue  # Skip if we can't find the parent
+        
+        if parent_id is not None:
+            # Remove the expanded non-terminal from the stack
+            parent_stack.pop(parent_idx)
             
-        # Add child nodes
-        if right == "ε":  # Handle epsilon
-            child_id = f"node_{node_counter}"
-            node_counter += 1
-            G.add_node(child_id, label="ε")
-            G.add_edge(parent_id, child_id)
-        else:
+            # Add child nodes
             right_symbols = right.split()
+            if right == "ε":
+                right_symbols = ["ε"]
+                
+            # Add nodes in reverse order for proper tree structure
             for symbol in right_symbols:
                 child_id = f"node_{node_counter}"
                 node_counter += 1
+                
+                # Add node and edge
                 G.add_node(child_id, label=symbol)
                 G.add_edge(parent_id, child_id)
                 
-                # If this is a non-terminal, add it to stack
-                if symbol[0].isupper() or "'" in symbol:
-                    if symbol not in node_map:
-                        node_map[symbol] = []
-                    node_map[symbol].append(child_id)
+                # If this is a non-terminal, add to stack for future processing
+                if (symbol[0].isupper() or "'" in symbol) and symbol != "ε":
                     parent_stack.append((child_id, symbol))
     
-    # Create the visualization with a hierarchical layout
-    plt.figure(figsize=(12, 10))
+    # Create a proper hierarchical tree layout
+    plt.figure(figsize=(12, 8))
     plt.title("Árbol de Derivación", fontsize=16)
     
-    # Use a hierarchical layout
+    # Use a hierarchical layout algorithm
     try:
+        # Try to use pygraphviz for best layout
         pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
     except:
-        # Fallback to a simple level layout
-        pos = {}
+        # Custom layout function as fallback
+        def tree_layout(G):
+            positions = {}
+            
+            # Helper function to position nodes
+            def position_node(node, x=0, y=0, width=10, level_height=2):
+                positions[node] = (x, -y)  # Negative y for top-down tree
+                
+                children = list(G.successors(node))
+                if not children:
+                    return
+                
+                # Calculate spacing between children
+                child_width = width / len(children)
+                
+                # Position each child
+                for i, child in enumerate(children):
+                    child_x = x - width/2 + child_width/2 + i * child_width
+                    position_node(child, child_x, y + level_height, child_width, level_height)
+            
+            # Position tree starting from root node (node with no predecessors)
+            roots = [n for n, d in G.in_degree() if d == 0]
+            if roots:
+                position_node(roots[0])
+                
+            return positions
         
-        def assign_pos(node_id, level=0, pos_dict=None, horizontal_positions=None):
-            if pos_dict is None:
-                pos_dict = {}
-            if horizontal_positions is None:
-                horizontal_positions = {}
-            
-            if level not in horizontal_positions:
-                horizontal_positions[level] = 0
-            
-            # Assign horizontal position for this node
-            h_pos = horizontal_positions[level]
-            pos_dict[node_id] = (h_pos, -level)  # Negative level to go top-down
-            horizontal_positions[level] += 1
-            
-            # Process children
-            children = list(G.successors(node_id))
-            for child in children:
-                assign_pos(child, level+1, pos_dict, horizontal_positions)
-            
-            return pos_dict
-        
-        # Start positioning from the root
-        root = list(G.nodes())[0]  # First node should be root
-        pos = assign_pos(root)
+        pos = tree_layout(G)
     
-    # Draw nodes with background color
-    nx.draw_networkx_nodes(G, pos, node_size=2000, node_color='lightblue', 
-                          edgecolors='black', alpha=0.8)
+    # Draw the tree
+    node_labels = {node: G.nodes[node]['label'] for node in G.nodes()}
     
-    # Draw node labels
-    labels = {node: G.nodes[node]['label'] for node in G.nodes()}
-    nx.draw_networkx_labels(G, pos, labels=labels, font_size=12, font_weight='bold')
+    # Draw circular nodes for a similar look to the image
+    nx.draw_networkx_nodes(G, pos, node_size=1500, node_color='lightblue', 
+                          edgecolors='black', node_shape='o')
     
     # Draw edges with arrows
-    nx.draw_networkx_edges(G, pos, arrows=True, arrowsize=20, 
-                          width=1.5, edge_color='black',
-                          connectionstyle='arc3,rad=0.1')
+    nx.draw_networkx_edges(G, pos, arrows=True, width=1.5)
     
-    # Remove axes and display the result
+    # Draw labels
+    nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=12, font_weight='bold')
+    
     plt.axis('off')
     st.pyplot(plt)
     
-    # Show caption
-    st.caption("Visualización jerárquica del árbol de derivación")
+    st.caption("Árbol de derivación para la gramática analizada")
 
 if __name__ == "__main__":
     main()
