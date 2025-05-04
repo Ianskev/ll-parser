@@ -46,7 +46,8 @@ Esta aplicación proporciona una interfaz gráfica interactiva para el análisis
 Para iniciar la aplicación, ejecuta:
 ```bash
 python run_app.py
-``` 
+```
+Inicialmente la aplicación pedira poner un correo simplemente dar enter y saltar posteriormente a esto:
 La aplicación se abrirá automáticamente en tu navegador web predeterminado.
 
 ## 📘 Guía detallada de funcionalidades
