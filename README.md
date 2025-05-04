@@ -47,7 +47,7 @@ Para iniciar la aplicación, ejecuta:
 ```bash
 python run_app.py
 ```
-Al abrir la aplicación por primera vez pedira correo (**Saltaremos dando enter**).  
+**Al abrir la aplicación por primera vez pedira correo (Saltaremos dando enter)**.  
 La aplicación se abrirá automáticamente en tu navegador web predeterminado.
 
 ## 📘 Guía detallada de funcionalidades
