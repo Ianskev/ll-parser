@@ -613,6 +613,61 @@ def create_fallback_tree_visualization(parse_steps: List[Dict[str, Any]]):
     
     st.caption("Árbol de derivación para la gramática y cadena de entrada analizada")
 
+def check_grammar_issues(grammar_text):
+    """
+    Check if a grammar has left recursion or needs left factorization
+    Returns a tuple (has_left_recursion, needs_factorization)
+    """
+    has_left_recursion = False
+    needs_factorization = False
+    
+    lines = grammar_text.strip().split('\n')
+    rules = {}
+    
+    # Parse the grammar
+    for line in lines:
+        if '->' not in line:
+            continue
+        left, right = line.split('->', 1)
+        non_terminal = left.strip()
+        productions = [p.strip() for p in right.split('|')]
+        if non_terminal not in rules:
+            rules[non_terminal] = []
+        rules[non_terminal].extend(productions)
+    
+    # Check for left recursion
+    for A, productions in rules.items():
+        for prod in productions:
+            prod_parts = prod.split()
+            if prod_parts and prod_parts[0] == A:
+                has_left_recursion = True
+                break
+        if has_left_recursion:
+            break
+    
+    # Check for need of left factorization
+    for A, productions in rules.items():
+        prefixes = {}
+        for prod in productions:
+            prod_parts = prod.split()
+            if not prod_parts:
+                continue
+                
+            prefix = prod_parts[0]
+            if prefix not in prefixes:
+                prefixes[prefix] = []
+            prefixes[prefix].append(prod)
+        
+        # If multiple productions share the same prefix, factorization is needed
+        for prefix, prods in prefixes.items():
+            if len(prods) > 1:
+                needs_factorization = True
+                break
+        if needs_factorization:
+            break
+    
+    return has_left_recursion, needs_factorization
+
 def main():
     # Setup session state to store editor content
     if 'grammar_text' not in st.session_state:
@@ -626,6 +681,8 @@ Typep -> int | char | bool | float
 Pointer -> * id"""
     if 'input_text' not in st.session_state:
         st.session_state.input_text = "struct id { int id ; struct id id ; * id id }"
+    if 'optimization_grammar' not in st.session_state:
+        st.session_state.optimization_grammar = """S -> S + S | S * S | id"""
 
     # Configuración de página con tema y estilo
     st.set_page_config(
@@ -653,6 +710,9 @@ Pointer -> * id"""
     # Helper function for virtual keyboard - simplify to append at the end
     def add_to_grammar(symbol):
         st.session_state.grammar_text += symbol
+
+    def add_to_optimization_grammar(symbol):
+        st.session_state.optimization_grammar += symbol
 
     # Encabezado principal
     st.markdown('<p class="big-font">Analizador Sintáctico LL(1)</p>', unsafe_allow_html=True)
@@ -701,17 +761,6 @@ Pointer -> * id"""
             st.session_state.grammar_text = grammar_text
             st.sidebar.success(f"Archivo '{uploaded_grammar.name}' cargado correctamente")
     
-    # Grammar optimization options
-    st.sidebar.markdown('<p class="sidebar-subtitle">Optimización de Gramática</p>', unsafe_allow_html=True)
-    optimize_grammar = st.sidebar.checkbox("Optimizar gramática")
-    
-    if optimize_grammar:
-        optimize_options = st.sidebar.multiselect(
-            "Seleccione optimizaciones a aplicar:",
-            ["Eliminar recursividad por izquierda", "Factorización por izquierda"],
-            default=["Eliminar recursividad por izquierda"]
-        )
-    
     # Input string options - simplified to just manual and file upload
     st.sidebar.markdown('<p class="sidebar-subtitle">Cadena de entrada</p>', unsafe_allow_html=True)
     input_string_method = st.sidebar.radio("Método de entrada para cadena:", ["Entrada manual", "Subir archivo"])
@@ -733,7 +782,7 @@ Pointer -> * id"""
             st.sidebar.success(f"Archivo '{uploaded_input.name}' cargado correctamente")
     
     # Contenido principal dividido en pestañas
-    tab1, tab2, tab3 = st.tabs(["Entrada y Análisis", "Árbol de Derivación", "Ayuda"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Entrada y Análisis", "Optimizar Gramática", "Árbol de Derivación", "Ayuda"])
     
     with tab1:
         # Creamos dos columnas para organizar el contenido
@@ -761,22 +810,23 @@ Pointer -> * id"""
         with col2:
             if analyze_btn and grammar_text and input_text:
                 try:
-                    # Aplicar optimizaciones si están activadas
-                    optimized_grammar = grammar_text
-                    if optimize_grammar:
-                        if "Eliminar recursividad por izquierda" in optimize_options:
-                            optimized_grammar = eliminate_left_recursion(optimized_grammar)
-                            st.success("✅ Recursividad por izquierda eliminada")
-                        if "Factorización por izquierda" in optimize_options:
-                            optimized_grammar = left_factorization(optimized_grammar)
-                            st.success("✅ Factorización por izquierda aplicada")
+                    # Check if grammar has issues before analyzing
+                    has_left_recursion, needs_factorization = check_grammar_issues(grammar_text)
+                    
+                    if has_left_recursion or needs_factorization:
+                        st.warning("⚠️ La gramática ingresada puede no ser compatible con LL(1):")
+                        if has_left_recursion:
+                            st.warning("• Se detectó recursividad por izquierda")
+                        if needs_factorization:
+                            st.warning("• Se detectó la necesidad de factorización por izquierda")
+                        st.info("👉 Vaya a la pestaña 'Optimizar Gramática' para transformar su gramática a una forma compatible con LL(1)")
                         
-                        st.markdown('<p class="medium-font">Gramática Optimizada</p>', unsafe_allow_html=True)
-                        st.code(optimized_grammar)
+                        # Copy the grammar to the optimization tab for convenience
+                        st.session_state.optimization_grammar = grammar_text
                     
                     # Crear archivos temporales para la gramática y la entrada
                     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as f:
-                        safe_grammar = optimized_grammar.replace('ε', 'eps') if optimize_grammar else grammar_text.replace('ε', 'eps')
+                        safe_grammar = grammar_text.replace('ε', 'eps')
                         f.write(safe_grammar)
                         grammar_file = f.name
                         
@@ -793,9 +843,15 @@ Pointer -> * id"""
                     
                     st.markdown('<p class="result-header">Resultado del Análisis</p>', unsafe_allow_html=True)
                     
-                    # Mostrar resultados en una tabla con estilo
+                    # Display analysis failure specific messages
                     if "RECHAZADA" in result:
                         st.error("❌ La cadena fue rechazada")
+                        
+                        # Check for specific error patterns
+                        if "No hay producción para" in result:
+                            st.error("Error de análisis LL(1): No se encontró una producción adecuada en la tabla.")
+                            if has_left_recursion or needs_factorization:
+                                st.info("Esto puede deberse a que la gramática no está en formato LL(1). Consulte la pestaña 'Optimizar Gramática'.")
                     else:
                         st.success("✅ La cadena fue aceptada")
                     
@@ -910,6 +966,8 @@ Pointer -> * id"""
                 
                 except Exception as e:
                     st.error(f"Error en el análisis: {str(e)}")
+                    # Suggest optimization if there's an error during analysis
+                    st.info("Si la gramática no está en formato LL(1), pruebe la pestaña 'Optimizar Gramática'")
             else:
                 with st.container():
                     st.info("👈 Ingrese su gramática y cadena a analizar, luego presione el botón 'Analizar Sintácticamente'")
@@ -917,6 +975,153 @@ Pointer -> * id"""
                              caption="Ejemplo de Análisis Sintáctico LL(1)", width=400)
     
     with tab2:
+        st.markdown('<p class="medium-font">Optimizar Gramática</p>', unsafe_allow_html=True)
+        
+        # Create two columns for the optimizations
+        opt_col1, opt_col2 = st.columns([1, 1.5])
+        
+        with opt_col1:
+            st.markdown("### Entrada de Gramática")
+            
+            opt_input_method = st.radio("Método de entrada:", ["Editor de texto", "Subir archivo"], key="opt_input_method")
+            
+            optimization_grammar = ""
+            if opt_input_method == "Editor de texto":
+                optimization_grammar = st.text_area(
+                    "Ingrese su gramática:", 
+                    value=st.session_state.optimization_grammar, 
+                    height=200,
+                    key="optimization_grammar_editor",
+                    on_change=lambda: setattr(st.session_state, 'optimization_grammar', st.session_state.optimization_grammar_editor)
+                )
+                
+                # Add virtual keyboard for grammar symbols
+                st.caption("Teclado virtual para gramática")
+                
+                opt_col1_1, opt_col1_2, opt_col1_3 = st.columns(3)
+                with opt_col1_1:
+                    st.button("ε", on_click=add_to_optimization_grammar, args=["ε"], key="opt_eps_btn", use_container_width=True)
+                with opt_col1_2:
+                    st.button("->", on_click=add_to_optimization_grammar, args=["->"], key="opt_arrow_btn", use_container_width=True)
+                with opt_col1_3:
+                    st.button("|", on_click=add_to_optimization_grammar, args=[" | "], key="opt_or_btn", use_container_width=True)
+            else:
+                uploaded_opt_grammar = st.file_uploader("Subir archivo de gramática (.txt)", type=["txt"], key="uploaded_opt_grammar")
+                if uploaded_opt_grammar:
+                    optimization_grammar = uploaded_opt_grammar.getvalue().decode("utf-8")
+                    st.session_state.optimization_grammar = optimization_grammar
+                    st.success(f"Archivo '{uploaded_opt_grammar.name}' cargado correctamente")
+            
+            analyze_grammar_btn = st.button("Analizar Gramática", 
+                                           type="primary",
+                                           disabled=not optimization_grammar,
+                                           key="analyze_grammar_btn")
+        
+        with opt_col2:
+            if analyze_grammar_btn and optimization_grammar:
+                st.markdown("### Resultados del Análisis")
+                
+                # Check if grammar has issues
+                has_left_recursion, needs_factorization = check_grammar_issues(optimization_grammar)
+                
+                st.markdown("#### Diagnóstico de la Gramática")
+                
+                is_ll1_compatible = not (has_left_recursion or needs_factorization)
+                
+                if is_ll1_compatible:
+                    st.success("✅ La gramática es compatible con LL(1)")
+                else:
+                    st.warning("⚠️ La gramática necesita optimización para ser compatible con LL(1)")
+                
+                col_lr, col_lf = st.columns(2)
+                
+                with col_lr:
+                    if has_left_recursion:
+                        st.warning("⚠️ Se detectó recursividad por izquierda")
+                    else:
+                        st.success("✅ Sin recursividad por izquierda")
+                
+                with col_lf:
+                    if needs_factorization:
+                        st.warning("⚠️ Necesita factorización por izquierda")
+                    else:
+                        st.success("✅ No requiere factorización")
+                
+                if not is_ll1_compatible:
+                    st.markdown("#### Gramática Optimizada")
+                    
+                    # Apply transformations
+                    optimized_grammar = optimization_grammar
+                    
+                    if has_left_recursion:
+                        lr_grammar = eliminate_left_recursion(optimized_grammar)
+                        with st.expander("Gramática sin recursividad por izquierda", expanded=True):
+                            st.code(lr_grammar)
+                            copy_lr_btn = st.button("Usar esta gramática", key="use_lr_grammar")
+                            if copy_lr_btn:
+                                st.session_state.grammar_text = lr_grammar
+                                st.success("✅ Gramática copiada a la pestaña de Análisis")
+                        
+                        optimized_grammar = lr_grammar
+                    
+                    if needs_factorization:
+                        lf_grammar = left_factorization(optimized_grammar)
+                        with st.expander("Gramática con factorización por izquierda", expanded=True):
+                            st.code(lf_grammar)
+                            copy_lf_btn = st.button("Usar esta gramática", key="use_lf_grammar")
+                            if copy_lf_btn:
+                                st.session_state.grammar_text = lf_grammar
+                                st.success("✅ Gramática copiada a la pestaña de Análisis")
+                        
+                        optimized_grammar = lf_grammar
+                    
+                    # Final optimized grammar if both transformations were applied
+                    if has_left_recursion and needs_factorization:
+                        with st.expander("Gramática completamente optimizada para LL(1)", expanded=True):
+                            st.code(optimized_grammar)
+                            copy_opt_btn = st.button("Usar esta gramática", key="use_opt_grammar")
+                            if copy_opt_btn:
+                                st.session_state.grammar_text = optimized_grammar
+                                st.success("✅ Gramática copiada a la pestaña de Análisis")
+                    
+                    st.info("👈 Use los botones 'Usar esta gramática' para copiarla a la pestaña de Análisis")
+                
+                st.markdown("#### ¿Siguiente paso?")
+                if is_ll1_compatible:
+                    st.success("La gramática ya es compatible con LL(1). Puede usarla directamente en la pestaña de Análisis.")
+                    copy_curr_btn = st.button("Usar gramática actual", key="use_current_grammar")
+                    if copy_curr_btn:
+                        st.session_state.grammar_text = optimization_grammar
+                        st.success("✅ Gramática copiada a la pestaña de Análisis")
+                else:
+                    st.info("Seleccione una de las gramáticas optimizadas para continuar con el análisis.")
+            else:
+                st.info("👈 Ingrese una gramática para analizarla y optimizarla automáticamente")
+                
+                st.markdown("### ¿Por qué optimizar?")
+                st.markdown("""
+                Un analizador LL(1) requiere gramáticas específicas sin:
+                
+                1. **Recursividad por izquierda**: Reglas donde un no terminal deriva a sí mismo como primer símbolo
+                   - Ejemplo: `A -> A α | β`
+                   
+                2. **Ambigüedad de prefijos**: Reglas con producciones alternativas que comparten prefijos
+                   - Ejemplo: `A -> α β | α γ`
+                
+                Esta herramienta transforma automáticamente tu gramática para hacerla compatible con LL(1).
+                """)
+                
+                with st.expander("Ver ejemplo de optimización"):
+                    st.code("""
+# Gramática original (con recursividad por izquierda)
+E -> E + T | T
+
+# Gramática optimizada (sin recursividad por izquierda)
+E -> T E'
+E' -> + T E' | ε
+                    """)
+    
+    with tab3:
         st.markdown('<p class="medium-font">Árbol de Derivación</p>', unsafe_allow_html=True)
         
         if 'parse_steps' in st.session_state and st.session_state.parse_steps:
@@ -963,7 +1168,7 @@ Pointer -> * id"""
         else:
             st.info("Realice un análisis exitoso en la pestaña 'Entrada y Análisis' para visualizar el árbol de derivación.")
     
-    with tab3:
+    with tab4:
         st.markdown('<p class="medium-font">Guía del Analizador LL(1)</p>', unsafe_allow_html=True)
         with st.expander("¿Cómo ingresar una gramática?", expanded=True):
             st.markdown("""
