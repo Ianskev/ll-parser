@@ -40,12 +40,21 @@ def parse_symbol_table(result_text):
         # Split by multiple spaces and filter out empty strings
         parts = [p for p in re.split(r'\s{2,}', line.strip()) if p]
         if len(parts) >= 5:
+            # Format FIRST and FOLLOW with curly braces if they're not empty
+            first = parts[3]
+            follow = parts[4]
+            
+            if first and first != "-":
+                first = "{" + first + "}"
+            
+            if follow and follow != "-":
+                follow = "{" + follow + "}"
+                
             data.append({
                 "Símbolo": parts[0],
                 "Tipo": parts[1],
-                "NULLABLE": parts[2],
-                "FIRST": parts[3],
-                "FOLLOW": parts[4]
+                "FIRST": first,
+                "FOLLOW": follow
             })
     
     return pd.DataFrame(data)
@@ -119,25 +128,50 @@ def parse_ll1_table(result_text):
         return None
     
     # Extract headers (terminal symbols)
-    headers = data_lines[0].strip().split()
+    headers = []
+    header_line = data_lines[0].strip()
+    pos = 0
+    while pos < len(header_line):
+        if header_line[pos].isspace():
+            pos += 1
+            continue
+        
+        # Find the next non-empty column
+        next_pos = pos
+        while next_pos < len(header_line) and not header_line[next_pos].isspace():
+            next_pos += 1
+        
+        headers.append(header_line[pos:next_pos].strip())
+        pos = next_pos
+    
+    # Remove any empty headers
+    headers = [h for h in headers if h.strip()]
     
     # Parse data rows
     data = []
     for line in data_lines[1:]:
-        parts = line.strip().split()
-        if not parts:
+        if not line.strip() or all(c == '-' for c in line.strip()):
             continue
+            
+        parts = []
+        pos = 0
+        column_width = 20  # Standard width of columns in the output
         
-        # First part is the non-terminal
-        non_terminal = parts[0]
+        # Extract non-terminal (first column)
+        non_terminal = line[:column_width].strip()
         
         # Create a row dict with the non-terminal as index
         row_data = {"Non-Terminal": non_terminal}
         
-        # Add productions for each terminal
-        for i, header in enumerate(headers):
-            if i+1 < len(parts):
-                row_data[header] = parts[i+1]
+        # Parse each production column
+        for i, header in enumerate(headers[1:], 1):  # Skip the first header which is empty
+            col_start = i * column_width
+            col_end = col_start + column_width
+            
+            # Get the cell content
+            if col_start < len(line):
+                cell_content = line[col_start:col_end].strip()
+                row_data[header] = cell_content
             else:
                 row_data[header] = ""
         
@@ -150,13 +184,13 @@ def style_dataframe(df, type_col=None):
     # Define CSS styles
     styles = [
         dict(selector="th", props=[("font-weight", "bold"), 
-                                 ("background-color", "#4CAF50"),
-                                 ("color", "white"),
-                                 ("text-align", "center"),
-                                 ("padding", "10px")]),
+                                   ("background-color", "#4CAF50"),
+                                   ("color", "white"),
+                                   ("text-align", "center"),
+                                   ("padding", "10px")]),
         dict(selector="td", props=[("padding", "8px"), 
-                                 ("text-align", "center"),
-                                 ("border", "1px solid #ddd")]),
+                                   ("text-align", "center"),
+                                   ("border", "1px solid #ddd")]),
         dict(selector="tr:nth-child(even)", props=[("background-color", "#f2f2f2")])
     ]
     
@@ -181,6 +215,183 @@ def style_dataframe(df, type_col=None):
             return ['background-color: ' + bg_color] * len(row)
             
         styled_df = styled_df.apply(highlight_row, axis=1)
+    
+    return styled_df
+
+def apply_enhanced_styling(df, highlight_column=None):
+    """
+    Apply enhanced styling to any dataframe with consistent colors
+    highlight_column: optional column name to use for row-based coloring
+    """
+    # Base styling for all tables
+    styled_df = df.style.set_properties(**{
+        'background-color': '#f0f8ff',
+        'color': 'black',
+        'border': '1px solid #dddddd',
+        'text-align': 'center',
+        'font-size': '14px'
+    }).set_table_styles([
+        {'selector': 'th', 'props': [
+            ('background-color', '#4CAF50'),
+            ('color', 'white'),
+            ('font-weight', 'bold'),
+            ('text-align', 'center'),
+            ('font-size', '16px'),
+            ('padding', '8px')
+        ]},
+        {'selector': 'td', 'props': [('padding', '8px')]},
+        {'selector': 'tr:nth-child(even)', 'props': [('background-color', '#f2f2f2')]}
+    ])
+    
+    # Apply row highlighting if a column is specified
+    if highlight_column and highlight_column in df.columns:
+        # Create a function that always returns a list of styles
+        def highlight_row(row):
+            colors = [''] * len(row)  # Initialize with empty strings
+            
+            # Default coloring for alternating rows
+            row_style = 'background-color: #f0f8ff'
+            
+            # Customized color scheme based on value in the highlight column
+            if highlight_column == "Tipo":
+                value = row[highlight_column]
+                if value == 'V':
+                    row_style = 'background-color: #E3F2FD'  # Light blue for non-terminals
+                elif value == 'T': 
+                    row_style = 'background-color: #F1F8E9'  # Light green for terminals
+                elif value == 'I':
+                    row_style = 'background-color: #EDE7F6'  # Light purple for start symbol
+                else:
+                    row_style = 'background-color: #FFF3E0'  # Light orange for special symbols
+            elif highlight_column == "ACCIÓN" or highlight_column == "Acción" or "accion" in highlight_column.lower():
+                value = str(row[highlight_column])
+                if "ERROR" in value:
+                    row_style = 'background-color: #FFEBEE'  # Light red for errors
+                elif "Match" in value:
+                    row_style = 'background-color: #E8F5E9'  # Light green for matches
+                elif "regla" in value.lower():
+                    row_style = 'background-color: #E3F2FD'  # Light blue for rule applications
+                else:
+                    row_style = 'background-color: #F5F5F5'  # Light gray for other actions
+            
+            # Fill the entire row with the selected style
+            return [row_style] * len(row)
+        
+        styled_df = styled_df.apply(highlight_row, axis=1)
+    
+    return styled_df
+
+def style_symbol_table(df):
+    """
+    Apply custom styling to the symbol table with specific colors for each column:
+    - Símbolo: keep the current color (blue for non-terminals)
+    - Tipo: red when there's no production
+    - FIRST and FOLLOW: green
+    """
+    # Base styling
+    styled_df = df.style.set_properties(**{
+        'background-color': '#f0f8ff',
+        'color': 'black',
+        'border': '1px solid #dddddd',
+        'text-align': 'center',
+        'font-size': '14px'
+    }).set_table_styles([
+        {'selector': 'th', 'props': [
+            ('background-color', '#4CAF50'),
+            ('color', 'white'),
+            ('font-weight', 'bold'),
+            ('text-align', 'center'),
+            ('font-size', '16px'),
+            ('padding', '8px')
+        ]},
+        {'selector': 'td', 'props': [('padding', '8px')]},
+        {'selector': 'tr:nth-child(even)', 'props': [('background-color', '#f2f2f2')]}
+    ])
+    
+    # Function to apply column-specific styling
+    def highlight_columns(s):
+        styles = [''] * len(s)
+        
+        for i, col in enumerate(df.columns):
+            if col == 'Símbolo':
+                # Apply color based on Type value in the same row
+                if s['Tipo'] == 'V':
+                    styles[i] = 'background-color: #E3F2FD'  # Light blue for non-terminals
+                elif s['Tipo'] == 'T':
+                    styles[i] = 'background-color: #F1F8E9'  # Light green for terminals
+                elif s['Tipo'] == 'I':
+                    styles[i] = 'background-color: #EDE7F6'  # Light purple for start symbol
+                else:
+                    styles[i] = 'background-color: #FFF3E0'  # Light orange for special symbols
+            elif col == 'Tipo':
+                # Red for Tipo when there's no production ("-" in FIRST or FOLLOW)
+                if s['FIRST'] == '-' or s['FOLLOW'] == '-':
+                    styles[i] = 'background-color: #FFEBEE'  # Light red
+                else:
+                    styles[i] = 'background-color: #F5F5F5'  # Light gray
+            elif col in ['FIRST', 'FOLLOW']:
+                styles[i] = 'background-color: #E8F5E9'  # Light green for FIRST and FOLLOW
+        
+        return styles
+    
+    # Apply the column-specific styling
+    styled_df = styled_df.apply(highlight_columns, axis=1)
+    
+    return styled_df
+
+def create_enhanced_ll1_table(df):
+    """
+    Create a better visualization for the LL(1) table with custom formatting
+    """
+    if df is None or df.empty:
+        return None
+    
+    # Make a copy to avoid modifying the original
+    formatted_df = df.copy()
+    
+    # Format the production cells to make them more readable
+    for col in formatted_df.columns:
+        if col == "Non-Terminal":
+            continue
+        # Apply formatting to make productions more readable
+        formatted_df[col] = formatted_df[col].apply(
+            lambda x: x.replace("->", " → ").replace("/", "<br>") if isinstance(x, str) else x
+        )
+    
+    # Apply styling
+    styled_df = formatted_df.style.set_properties(**{
+        'background-color': '#f0f8ff',
+        'color': 'black',
+        'border': '1px solid #dddddd',
+        'text-align': 'center',
+        'font-size': '14px'
+    }).set_table_styles([
+        {'selector': 'th', 'props': [
+            ('background-color', '#4CAF50'),
+            ('color', 'white'),
+            ('font-weight', 'bold'),
+            ('text-align', 'center'),
+            ('font-size', '16px'),
+            ('padding', '8px')
+        ]},
+        {'selector': 'td', 'props': [('padding', '8px')]},
+        {'selector': 'tr:nth-child(even)', 'props': [('background-color', '#f2f2f2')]}
+    ])
+    
+    # Define a simpler styling function that won't cause index errors
+    def highlight_cells(s):
+        cell_styles = [''] * len(s)
+        for i in range(len(s)):
+            if i == 0:  # First column (non-terminal)
+                cell_styles[i] = 'background-color: #E3F2FD'
+            elif isinstance(s.iloc[i], str) and "→" in s.iloc[i]:  # Production cells
+                cell_styles[i] = 'background-color: #E8F5E9'
+            elif s.iloc[i] == "-" or s.iloc[i] == "":  # Empty cells
+                cell_styles[i] = 'background-color: #FFEBEE'
+        return cell_styles
+    
+    # Apply styling using apply with axis=1 for row-wise operation
+    styled_df = styled_df.apply(highlight_cells, axis=1)
     
     return styled_df
 
@@ -391,47 +602,77 @@ F -> ( E ) | id"""
                     else:
                         st.success("✅ La cadena fue aceptada")
                     
-                    # Parse and display the tables in a more visually appealing format
+                    # Parse the tables in a more visually appealing format
                     with st.expander("Ver resultado completo (texto plano)", expanded=False):
                         st.text(result)
                     
-                    # Parse and display the Symbol Table with a fallback option
-                    symbol_df = parse_symbol_table(result)
-                    if symbol_df is not None:
-                        st.markdown('<p class="medium-font">Tabla de Símbolos</p>', unsafe_allow_html=True)
-                        try:
-                            st.dataframe(style_dataframe(symbol_df, 'Tipo'), use_container_width=True)
-                        except Exception as e:
-                            st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
-                            st.dataframe(symbol_df, use_container_width=True)  # Fallback to unstyle
+                    # Create tabs for each type of analysis table
+                    results_tab1, results_tab2, results_tab3 = st.tabs(["Tabla de Símbolos", "Análisis de la Cadena", "Tabla de Análisis LL(1)"])
                     
-                    # Parse and display the Chain Analysis with a fallback option
-                    chain_df = parse_chain_analysis(result)
-                    if chain_df is not None:
-                        st.markdown('<p class="medium-font">Análisis de la Cadena</p>', unsafe_allow_html=True)
-                        try:
-                            st.dataframe(style_dataframe(chain_df), use_container_width=True)
-                        except Exception as e:
-                            st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
-                            st.dataframe(chain_df, use_container_width=True)  # Fallback to unstyle
+                    # Tab 1: Display the Symbol Table (non-terminal symbols only)
+                    with results_tab1:
+                        symbol_df = parse_symbol_table(result)
+                        if symbol_df is not None:
+                            # Filter out terminal symbols and select only needed columns
+                            non_terminals_df = symbol_df[symbol_df["Tipo"].isin(["I", "V"])][["Símbolo", "Tipo", "FIRST", "FOLLOW"]]
+                            
+                            if not non_terminals_df.empty:
+                                try:
+                                    st.dataframe(
+                                        style_symbol_table(non_terminals_df),
+                                        use_container_width=True
+                                    )
+                                except Exception as e:
+                                    st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
+                                    st.dataframe(non_terminals_df, use_container_width=True)  # Fallback
+                            else:
+                                st.info("No se encontraron símbolos no terminales en la gramática.")
+                        else:
+                            st.warning("No se pudo extraer la tabla de símbolos del resultado.")
                     
-                    # Parse and display the LL(1) Table with a fallback option
-                    ll1_df = parse_ll1_table(result)
-                    if ll1_df is not None:
-                        st.markdown('<p class="medium-font">Tabla de Análisis LL(1)</p>', unsafe_allow_html=True)
-                        try:
-                            st.dataframe(style_dataframe(ll1_df), use_container_width=True)
-                        except Exception as e:
-                            st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
-                            st.dataframe(ll1_df, use_container_width=True)  # Fallback to unstyle
+                    # Tab 2: Display the Chain Analysis
+                    with results_tab2:
+                        chain_df = parse_chain_analysis(result)
+                        if chain_df is not None:
+                            try:
+                                # Find the action column more safely
+                                action_column = None
+                                for col in chain_df.columns:
+                                    if "ACCIÓN" in col or "ACCION" in col or "accion" in col.lower():
+                                        action_column = col
+                                        break
+                                
+                                if action_column:
+                                    st.dataframe(apply_enhanced_styling(chain_df, action_column), use_container_width=True)
+                                else:
+                                    st.dataframe(apply_enhanced_styling(chain_df), use_container_width=True)
+                            except Exception as e:
+                                st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
+                                st.dataframe(chain_df, use_container_width=True)  # Fallback
+                        else:
+                            st.warning("No se pudo extraer el análisis de la cadena del resultado.")
                     
-                    # Botón para descargar resultados
-                    st.download_button(
-                        label="Descargar Resultados",
-                        data=result,
-                        file_name="analisis_ll1.txt",
-                        mime="text/plain",
-                    )
+                    # Tab 3: Display the LL(1) Table with improved formatting
+                    with results_tab3:
+                        ll1_df = parse_ll1_table(result)
+                        if ll1_df is not None:
+                            try:
+                                # Try to display with enhanced styling
+                                st.dataframe(create_enhanced_ll1_table(ll1_df), use_container_width=True)
+                            except Exception as e:
+                                st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
+                                try:
+                                    # Fall back to basic display
+                                    st.table(ll1_df)
+                                except:
+                                    # Last resort: plain text display
+                                    ll1_match = re.search(r"TABLA DE ANÁLISIS LL\(1\)(.*?)(?=\n\n)", result, re.DOTALL)
+                                    if ll1_match:
+                                        st.text(ll1_match.group(1))
+                                    else:
+                                        st.warning("No se pudo extraer la tabla de análisis LL(1) del resultado.")
+                        else:
+                            st.warning("No se pudo extraer la tabla de análisis LL(1) del resultado.")
                     
                     # Guardar los pasos de análisis para el árbol de derivación
                     if "ACEPTADA" in result:

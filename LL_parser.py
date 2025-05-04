@@ -566,21 +566,28 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
         output.write("-" * 70 + "\n")
         
         for simbolo, datos in grammar.items():
-            if simbolo == epsilon:
+            if simbolo == epsilon:  # Skip epsilon in symbol table display
                 continue
             tipo = datos['tipo']
             nullable = "Sí" if datos.get('nullable', False) else "No"
-            first = ", ".join(datos.get('first', []))
+            
+            # Exclude epsilon from FIRST sets for display
+            first_set = datos.get('first', [])
+            first = ", ".join([f for f in first_set if f != epsilon])
+            
             follow = ", ".join(datos.get('follow', [])) if 'follow' in datos else "-"
             output.write(f"{simbolo:<10} {tipo:<8} {nullable:<10} {first:<20} {follow:<20}\n")
         
         output.write("\n\nTABLA DE ANÁLISIS LL(1)\n")
         output.write(f"{'':20}")
-        for t in terminales + ["$"]:
+        
+        # Display only actual terminals (not epsilon) in the table header
+        display_terminals = [t for t in terminales + ["$"] if t != epsilon]
+        for t in display_terminals:
             output.write(f"{t:<20}")
         output.write("\n")
         
-        output.write("-" * (20 + 20 * len(terminales + ["$"])) + "\n")
+        output.write("-" * (20 + 20 * len(display_terminals)) + "\n")
         
         # Use set to avoid duplicates when displaying
         displayed_symbols = []
@@ -590,7 +597,7 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
             displayed_symbols.append(nt)
             
             output.write(f"{nt:20}")
-            for t in terminales + ["$"]:
+            for t in display_terminals:  # Only iterate over actual terminals
                 producciones = tabla[nt][t]
                 if producciones:
                     produccion_strs = [f"{p['Izq']} -> {' '.join(p['Der']).replace('eps', 'ε')}" for p in producciones]
