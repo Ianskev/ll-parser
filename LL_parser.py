@@ -248,67 +248,98 @@ def generate_parse_tree(parse_steps):
     # Create a new digraph
     dot = graphviz.Digraph('Parse Tree', format='png')
     
-    # Configure for a clean, hierarchical tree layout like in the image
+    # Configure for a clean, hierarchical tree layout with increased spacing
     dot.attr(rankdir='TB')  # Top to bottom
-    dot.attr('node', shape='box', style='solid', color='black', fontname='Arial')
+    dot.attr('node', shape='circle', style='filled', color='black', fillcolor='lightblue', 
+             fontname='Arial', height='0.6', width='0.6', fixedsize='true')
     dot.attr('edge', arrowhead='normal', color='black')
-    dot.attr('graph', ranksep='0.5', nodesep='0.5')
+    # Increase spacing between nodes to prevent overlap
+    dot.attr('graph', ranksep='0.8', nodesep='0.5', overlap='false', splines='true')
     
     # Add title
     dot.attr(label='Visualización del Árbol Sintáctico', labelloc='t', fontsize='20')
     
-    # Extract all the production rules applied
-    steps_with_productions = []
+    # Track all actions: both rule applications and token matches
+    all_actions = []
     for step in parse_steps:
         action = step.get('accion', '')
         if action.startswith('Aplicar regla:'):
             rule = action.replace('Aplicar regla: ', '')
             left_side, right_side = rule.split('->')
-            steps_with_productions.append((left_side.strip(), right_side.strip()))
+            all_actions.append(('rule', left_side.strip(), right_side.strip()))
+        elif action.startswith('Match:'):
+            token = action.replace('Match: ', '')
+            all_actions.append(('match', token))
     
     # Initialize tracking variables
     node_counter = 0
     node_map = {}  # Maps symbols to their node IDs
     parent_stack = []
+    terminal_nodes = []  # To track terminal nodes in order they are matched
     
-    # Process the first production to create the root
-    if steps_with_productions:
-        root_symbol = steps_with_productions[0][0]
-        root_id = str(node_counter)
-        node_counter += 1
-        dot.node(root_id, root_symbol)
-        parent_stack.append((root_id, root_symbol))
+    # Find the start symbol (from the first rule application)
+    start_symbol = None
+    for action_type, *args in all_actions:
+        if action_type == 'rule':
+            start_symbol = args[0]
+            break
     
-    # Process each production rule
-    for left_side, right_side in steps_with_productions:
-        # Find and remove the non-terminal being expanded from the stack
-        parent_id = None
-        parent_symbol = None
-        for idx in range(len(parent_stack) - 1, -1, -1):
-            if parent_stack[idx][1] == left_side:
-                parent_id, parent_symbol = parent_stack.pop(idx)
-                break
-        
-        if parent_id is None:
-            # Skip this production if we can't find its parent
-            continue
-        
-        # Process the right side of the production
-        symbols = right_side.split()
-        if right_side == 'ε':  # Special case for epsilon
-            symbols = ['ε']
-        
-        # Create nodes for all symbols on the right side
-        for symbol in symbols:
-            child_id = str(node_counter)
-            node_counter += 1
-            dot.node(child_id, symbol)
-            dot.edge(parent_id, child_id)
+    if not start_symbol:
+        return dot  # Empty tree if no rules found
+    
+    # Create root node
+    root_id = f"node_{node_counter}"
+    node_counter += 1
+    dot.node(root_id, start_symbol)
+    parent_stack.append((root_id, start_symbol))
+    
+    # Process all actions in order
+    for action_type, *args in all_actions:
+        if action_type == 'rule':
+            left_side, right_side = args
             
-            # If this is a non-terminal, add it to the stack for future expansion
-            # Consider both uppercase symbols and those with apostrophes (like E')
-            if symbol[0].isupper() or "'" in symbol:
-                parent_stack.append((child_id, symbol))
+            # Find and remove the non-terminal being expanded from the stack
+            parent_id = None
+            parent_idx = -1
+            for idx, (node_id, symbol) in enumerate(parent_stack):
+                if symbol == left_side:
+                    parent_id = node_id
+                    parent_idx = idx
+                    break
+            
+            if parent_id is None:
+                continue  # Skip if parent not found
+            
+            # Remove the expanded non-terminal
+            parent_stack.pop(parent_idx)
+            
+            # Process the right side of the production
+            symbols = right_side.split()
+            if right_side == 'ε':  # Special case for epsilon
+                symbols = ['ε']
+            
+            # Add child nodes in reverse order to stack (for left-to-right processing)
+            children_ids = []
+            for symbol in symbols:
+                child_id = f"node_{node_counter}"
+                node_counter += 1
+                
+                # Add node and edge
+                dot.node(child_id, symbol)
+                dot.edge(parent_id, child_id)
+                children_ids.append(child_id)
+                
+                # Add to stack in reverse order for left-to-right expansions
+                if symbol[0].isupper() or "'" in symbol:  # Non-terminal
+                    parent_stack.append((child_id, symbol))
+                elif symbol != 'ε':  # Terminal but not epsilon
+                    terminal_nodes.append((child_id, symbol))
+    
+    # Use subgraphs to ensure terminals are aligned at the bottom
+    with dot.subgraph() as s:
+        s.attr(rank='same')
+        for node_id, _ in terminal_nodes:
+            s.node(node_id)
     
     return dot
 
@@ -579,7 +610,7 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
             output.write(f"{simbolo:<10} {tipo:<8} {nullable:<10} {first:<20} {follow:<20}\n")
         
         output.write("\n\nTABLA DE ANÁLISIS LL(1)\n")
-        output.write(f"{'':20}")
+        output.write(f"{'Non-Terminal':20}")
         
         # Display only actual terminals (not epsilon) in the table header
         display_terminals = [t for t in terminales + ["$"] if t != epsilon]
@@ -600,8 +631,14 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
             for t in display_terminals:  # Only iterate over actual terminals
                 producciones = tabla[nt][t]
                 if producciones:
-                    produccion_strs = [f"{p['Izq']} -> {' '.join(p['Der']).replace('eps', 'ε')}" for p in producciones]
-                    output.write(f"{' / '.join(produccion_strs):<20}")
+                    # Create a cleaner, single production string for each cell
+                    # Only show the first production if there are multiple
+                    if producciones:
+                        p = producciones[0]
+                        production_str = f"{p['Izq']} -> {' '.join(p['Der']).replace('eps', 'ε')}"
+                    else:
+                        production_str = "-"
+                    output.write(f"{production_str:<20}")
                 else:
                     output.write(f"{'-':<20}")
             output.write("\n")

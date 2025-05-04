@@ -127,53 +127,41 @@ def parse_ll1_table(result_text):
     if len(data_lines) < 2:
         return None
     
-    # Extract headers (terminal symbols)
-    headers = []
+    # Parse the header row first
     header_line = data_lines[0].strip()
-    pos = 0
-    while pos < len(header_line):
-        if header_line[pos].isspace():
-            pos += 1
-            continue
-        
-        # Find the next non-empty column
-        next_pos = pos
-        while next_pos < len(header_line) and not header_line[next_pos].isspace():
-            next_pos += 1
-        
-        headers.append(header_line[pos:next_pos].strip())
-        pos = next_pos
+    terminals = []
     
-    # Remove any empty headers
-    headers = [h for h in headers if h.strip()]
+    # Extract terminals from header, respecting fixed column width
+    col_width = 20
+    for i in range(1, len(header_line) // col_width + 1):
+        start = i * col_width
+        end = start + col_width
+        if start < len(header_line):
+            terminal = header_line[start:end].strip()
+            if terminal:
+                terminals.append(terminal)
     
-    # Parse data rows
+    # Create DataFrame structure with non-terminals as rows and terminals as columns
     data = []
+    
+    # Process each row (non-terminal)
     for line in data_lines[1:]:
-        if not line.strip() or all(c == '-' for c in line.strip()):
-            continue
-            
-        parts = []
-        pos = 0
-        column_width = 20  # Standard width of columns in the output
+        row_data = {}
         
         # Extract non-terminal (first column)
-        non_terminal = line[:column_width].strip()
+        non_terminal = line[:col_width].strip()
+        row_data["Non-Terminal"] = non_terminal
         
-        # Create a row dict with the non-terminal as index
-        row_data = {"Non-Terminal": non_terminal}
-        
-        # Parse each production column
-        for i, header in enumerate(headers[1:], 1):  # Skip the first header which is empty
-            col_start = i * column_width
-            col_end = col_start + column_width
+        # Extract productions for each terminal
+        for i, terminal in enumerate(terminals):
+            col_start = (i + 1) * col_width
+            col_end = col_start + col_width
             
-            # Get the cell content
             if col_start < len(line):
-                cell_content = line[col_start:col_end].strip()
-                row_data[header] = cell_content
+                cell = line[col_start:col_end].strip()
+                row_data[terminal] = cell
             else:
-                row_data[header] = ""
+                row_data[terminal] = "-"
         
         data.append(row_data)
     
@@ -341,7 +329,7 @@ def style_symbol_table(df):
 
 def create_enhanced_ll1_table(df):
     """
-    Create a better visualization for the LL(1) table with custom formatting
+    Create a better visualization for the LL(1) table with custom formatting similar to image #3
     """
     if df is None or df.empty:
         return None
@@ -353,47 +341,205 @@ def create_enhanced_ll1_table(df):
     for col in formatted_df.columns:
         if col == "Non-Terminal":
             continue
-        # Apply formatting to make productions more readable
         formatted_df[col] = formatted_df[col].apply(
-            lambda x: x.replace("->", " → ").replace("/", "<br>") if isinstance(x, str) else x
+            lambda x: x.replace("->", "→") if isinstance(x, str) and "->" in x else x
         )
     
     # Apply styling
     styled_df = formatted_df.style.set_properties(**{
-        'background-color': '#f0f8ff',
-        'color': 'black',
         'border': '1px solid #dddddd',
         'text-align': 'center',
-        'font-size': '14px'
+        'font-size': '14px',
+        'padding': '8px'
     }).set_table_styles([
         {'selector': 'th', 'props': [
-            ('background-color', '#4CAF50'),
-            ('color', 'white'),
+            ('background-color', '#f2f2f2'),
+            ('color', 'black'),
             ('font-weight', 'bold'),
             ('text-align', 'center'),
-            ('font-size', '16px'),
-            ('padding', '8px')
-        ]},
-        {'selector': 'td', 'props': [('padding', '8px')]},
-        {'selector': 'tr:nth-child(even)', 'props': [('background-color', '#f2f2f2')]}
+            ('font-size', '14px'),
+            ('padding', '8px'),
+            ('border', '1px solid #dddddd')
+        ]}
     ])
     
-    # Define a simpler styling function that won't cause index errors
-    def highlight_cells(s):
-        cell_styles = [''] * len(s)
-        for i in range(len(s)):
-            if i == 0:  # First column (non-terminal)
-                cell_styles[i] = 'background-color: #E3F2FD'
-            elif isinstance(s.iloc[i], str) and "→" in s.iloc[i]:  # Production cells
-                cell_styles[i] = 'background-color: #E8F5E9'
-            elif s.iloc[i] == "-" or s.iloc[i] == "":  # Empty cells
-                cell_styles[i] = 'background-color: #FFEBEE'
-        return cell_styles
+    # Define a function to style cells based on content
+    def style_cells(val):
+        if val == '-':
+            return 'background-color: #ffcccc'  # Light red for empty cells
+        elif '→' in str(val):
+            return 'background-color: #ccffcc'  # Light green for production rules
+        elif val == 'ε':
+            return 'background-color: #ffe6cc'  # Light orange for epsilon
+        else:
+            return ''
     
-    # Apply styling using apply with axis=1 for row-wise operation
-    styled_df = styled_df.apply(highlight_cells, axis=1)
+    # Apply cell-by-cell styling
+    styled_df = styled_df.applymap(style_cells)
+    
+    # Style the Non-Terminal column with light blue background
+    for i in range(len(formatted_df)):
+        styled_df.set_properties(subset=pd.IndexSlice[i, 'Non-Terminal'], **{
+            'background-color': '#e6f2ff',
+            'font-weight': 'bold'
+        })
     
     return styled_df
+
+def create_fallback_tree_visualization(parse_steps):
+    """Create a proper hierarchical tree visualization based on the input string"""
+    # Extract both production rules and token matches
+    actions = []
+    for step in parse_steps:
+        action = step.get("accion", "")
+        if action.startswith("Aplicar regla:"):
+            rule = action.replace("Aplicar regla: ", "")
+            left, right = rule.split("->")
+            actions.append(("rule", left.strip(), right.strip()))
+        elif action.startswith("Match:"):
+            token = action.replace("Match: ", "")
+            actions.append(("match", token))
+    
+    if not actions:
+        st.warning("No hay suficientes datos para generar el árbol de derivación.")
+        return
+    
+    # Create a directed graph
+    G = nx.DiGraph()
+    
+    # Find the start symbol
+    start_symbol = None
+    for action_type, *args in actions:
+        if action_type == "rule":
+            start_symbol = args[0]
+            break
+            
+    if not start_symbol:
+        st.warning("No se pudo determinar el símbolo inicial.")
+        return
+    
+    # Create tree structure with parent tracking
+    node_counter = 0
+    parent_stack = []
+    terminal_nodes = []
+    
+    # Start with the root node
+    root_id = f"node_{node_counter}"
+    G.add_node(root_id, label=start_symbol, type="non-terminal")
+    parent_stack.append((root_id, start_symbol))
+    node_counter += 1
+    
+    # Process each action
+    for action_type, *args in actions:
+        if action_type == "rule":
+            left, right = args
+            
+            # Find the parent node for this expansion
+            parent_id = None
+            parent_idx = -1
+            for idx, (node_id, symbol) in enumerate(parent_stack):
+                if symbol == left:
+                    parent_id = node_id
+                    parent_idx = idx
+                    break
+            
+            if parent_id is not None:
+                # Remove the expanded non-terminal from the stack
+                parent_stack.pop(parent_idx)
+                
+                # Add child nodes
+                right_symbols = right.split()
+                if right == "ε":
+                    right_symbols = ["ε"]
+                    
+                # Add nodes for each symbol
+                for symbol in right_symbols:
+                    child_id = f"node_{node_counter}"
+                    node_counter += 1
+                    
+                    # Determine node type
+                    node_type = "epsilon" if symbol == "ε" else \
+                                "non-terminal" if (symbol[0].isupper() or "'" in symbol) else \
+                                "terminal"
+                    
+                    # Add node and edge
+                    G.add_node(child_id, label=symbol, type=node_type)
+                    G.add_edge(parent_id, child_id)
+                    
+                    # If this is a non-terminal, add to stack for future processing
+                    if node_type == "non-terminal":
+                        parent_stack.append((child_id, symbol))
+                    elif node_type == "terminal":
+                        terminal_nodes.append(child_id)
+    
+    # Create a proper hierarchical tree layout
+    plt.figure(figsize=(12, 8))
+    plt.title("Árbol de Derivación", fontsize=16)
+    
+    try:
+        # Use hierarchical layout
+        pos = nx.drawing.nx_agraph.graphviz_layout(G, prog="dot")
+    except:
+        # Fallback to a custom layout function with better node separation
+        pos = {}
+        
+        def assign_positions(node, level=0, x_pos=0, width=1.0, min_sep=1.5):
+            """Position nodes in a hierarchical layout with minimum separation"""
+            pos[node] = (x_pos, -level)  # Negative level for top-down layout
+            children = list(G.successors(node))
+            
+            if not children:
+                return x_pos, x_pos + width  # Return range taken by this subtree
+            
+            # Calculate total width needed for all children with separation
+            child_width = width / len(children)
+            if child_width < min_sep:
+                child_width = min_sep
+                
+            # Position each child
+            left_bound = x_pos - (child_width * (len(children) - 1) / 2)
+            for i, child in enumerate(children):
+                child_x = left_bound + i * child_width
+                assign_positions(child, level + 1, child_x, child_width, min_sep)
+            
+            return x_pos - width/2, x_pos + width/2
+        
+        # Start positioning from the root
+        roots = [n for n, d in G.in_degree() if d == 0]
+        if roots:
+            assign_positions(roots[0])
+    
+    # Draw nodes with different styles based on node type
+    node_labels = {node: G.nodes[node]['label'] for node in G.nodes()}
+    
+    # Use different colors for different node types
+    node_colors = []
+    for node in G.nodes():
+        node_type = G.nodes[node].get('type', 'unknown')
+        if node_type == 'non-terminal':
+            node_colors.append('lightblue')
+        elif node_type == 'terminal':
+            node_colors.append('lightgreen')
+        elif node_type == 'epsilon':
+            node_colors.append('lightyellow')
+        else:
+            node_colors.append('lightgray')
+    
+    # Draw the tree with larger node spacing
+    nx.draw_networkx_nodes(G, pos, node_size=2000, node_color=node_colors,
+                          edgecolors='black', node_shape='o')
+    
+    # Draw edges with arrows
+    nx.draw_networkx_edges(G, pos, arrows=True, width=1.5, arrowsize=15)
+    
+    # Draw labels
+    nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=12, font_weight='bold')
+    
+    plt.axis('off')
+    plt.tight_layout()
+    st.pyplot(plt)
+    
+    st.caption("Árbol de derivación para la gramática y cadena de entrada analizada")
 
 def main():
     # Setup session state to store editor content
@@ -815,131 +961,6 @@ C -> c C | ε
             - Análisis de cadenas mediante algoritmo predictivo
             - Visualización del árbol de derivación
             """)
-
-def create_fallback_tree_visualization(parse_steps):
-    """Create a proper hierarchical tree visualization similar to the image shown"""
-    # Extract production rules from parse steps
-    productions = [step for step in parse_steps if step.get("accion", "").startswith("Aplicar regla:")]
-    
-    if not productions:
-        st.warning("No hay suficientes datos para generar el árbol de derivación.")
-        return
-    
-    # Create a directed graph
-    G = nx.DiGraph()
-    
-    # Get the start symbol from the first production
-    first_rule = productions[0]["accion"].replace("Aplicar regla: ", "")
-    start_symbol, _ = first_rule.split("->")
-    start_symbol = start_symbol.strip()
-    
-    # Create tree structure with parent tracking
-    used_symbols = set()  # Track symbols already used in the tree
-    parent_map = {}  # Track parent relationships
-    symbol_nodes = {}  # Map symbols to node IDs
-    node_counter = 0
-    parent_stack = []
-    
-    # Start with the root node
-    root_id = f"node_{node_counter}"
-    G.add_node(root_id, label=start_symbol)
-    symbol_nodes[start_symbol] = [root_id]
-    parent_stack.append((root_id, start_symbol))
-    node_counter += 1
-    
-    # Process each production rule
-    for step in productions:
-        rule = step["accion"].replace("Aplicar regla: ", "")
-        left, right = rule.split("->")
-        left = left.strip()
-        right = right.strip()
-        
-        # Find the parent node for this expansion
-        parent_id = None
-        parent_idx = -1
-        for idx, (node_id, symbol) in enumerate(parent_stack):
-            if symbol == left:
-                parent_id = node_id
-                parent_idx = idx
-                break
-        
-        if parent_id is not None:
-            # Remove the expanded non-terminal from the stack
-            parent_stack.pop(parent_idx)
-            
-            # Add child nodes
-            right_symbols = right.split()
-            if right == "ε":
-                right_symbols = ["ε"]
-                
-            # Add nodes in reverse order for proper tree structure
-            for symbol in right_symbols:
-                child_id = f"node_{node_counter}"
-                node_counter += 1
-                
-                # Add node and edge
-                G.add_node(child_id, label=symbol)
-                G.add_edge(parent_id, child_id)
-                
-                # If this is a non-terminal, add to stack for future processing
-                if (symbol[0].isupper() or "'" in symbol) and symbol != "ε":
-                    parent_stack.append((child_id, symbol))
-    
-    # Create a proper hierarchical tree layout
-    plt.figure(figsize=(12, 8))
-    plt.title("Árbol de Derivación", fontsize=16)
-    
-    # Use a hierarchical layout algorithm
-    try:
-        # Try to use pygraphviz for best layout
-        pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
-    except:
-        # Custom layout function as fallback
-        def tree_layout(G):
-            positions = {}
-            
-            # Helper function to position nodes
-            def position_node(node, x=0, y=0, width=10, level_height=2):
-                positions[node] = (x, -y)  # Negative y for top-down tree
-                
-                children = list(G.successors(node))
-                if not children:
-                    return
-                
-                # Calculate spacing between children
-                child_width = width / len(children)
-                
-                # Position each child
-                for i, child in enumerate(children):
-                    child_x = x - width/2 + child_width/2 + i * child_width
-                    position_node(child, child_x, y + level_height, child_width, level_height)
-            
-            # Position tree starting from root node (node with no predecessors)
-            roots = [n for n, d in G.in_degree() if d == 0]
-            if roots:
-                position_node(roots[0])
-                
-            return positions
-        
-        pos = tree_layout(G)
-    
-    # Draw the tree
-    node_labels = {node: G.nodes[node]['label'] for node in G.nodes()}
-    
-    # Draw circular nodes for a similar look to the image
-    nx.draw_networkx_nodes(G, pos, node_size=1500, node_color='lightblue', 
-                          edgecolors='black', node_shape='o')
-    
-    # Draw edges with arrows
-    nx.draw_networkx_edges(G, pos, arrows=True, width=1.5)
-    
-    # Draw labels
-    nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=12, font_weight='bold')
-    
-    plt.axis('off')
-    st.pyplot(plt)
-    
-    st.caption("Árbol de derivación para la gramática analizada")
 
 if __name__ == "__main__":
     main()
