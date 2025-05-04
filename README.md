@@ -109,7 +109,7 @@ La aplicación se abrirá automáticamente en tu navegador web predeterminado.
    - Estado de la pila en cada paso.
    - Entrada pendiente.
    - Acciones realizadas.
-   - 🟢 Coincidencia exitosa, 🔵 aplicación de regla, 🔴 error sintáctico.
+   - ✅ CADENADA ACEPTADA y ❌ CADENA RECHAZADA
 
 3. **Tabla de Análisis LL(1)**:
    - Filas: no terminales.
@@ -118,25 +118,10 @@ La aplicación se abrirá automáticamente en tu navegador web predeterminado.
 
 ### 4️⃣ Visualización del árbol de derivación
 
-- 🌳 Genera un árbol visual de alta calidad con Graphviz.
-- 🖼️ Alternativa con Matplotlib si no se dispone de Graphviz.
+- 🌳 Genera un árbol visual de alta calidad
 - 🎨 Colores:
   - 🟦 Azul: no terminales.
   - 🟩 Verde: terminales.
-
-### 5️⃣ Exportación de resultados
-
-- 💾 Descarga el análisis completo como archivo de texto.
-- 📥 Guarda el árbol de derivación en HTML para revisarlo offline.
-
-## 📝 Ejemplos prácticos
-
-- **Expresiones aritméticas**:
-  - Cadena: `id + id * id`
-  - Demuestra eliminación de recursividad, precedencia de operadores y construcción del árbol.
-
-- **Gramática recursiva por izquierda**:
-  - Optimiza para convertirla en LL(1).
 
 
 *Desarrollado para el curso de Compiladores - UTEC*  
