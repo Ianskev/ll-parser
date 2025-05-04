@@ -3,6 +3,8 @@ import json
 import io
 import graphviz
 import copy
+from typing import List, Dict, Any, Optional
+import streamlit as st
 
 def extract_grammar(file_path):
     """Extract grammar rules from a file"""
@@ -243,104 +245,161 @@ def left_factorization(grammar_text):
     
     return '\n'.join(result)
 
-def generate_parse_tree(parse_steps):
-    """Generate a visual parse tree using graphviz"""
-    # Create a new digraph
+def generate_parse_tree(parse_steps: List[Dict[str, Any]]) -> Optional[graphviz.Digraph]:
+    """
+    Genera una visualización limpia del árbol de derivación usando Graphviz.
+    Esta es la versión recomendada si puedes instalar Graphviz.
+
+    Args:
+        parse_steps: Una lista de diccionarios representando los pasos del parseo.
+                     Se esperan claves 'accion' con valores como 'Aplicar regla: E -> T E''.
+
+    Returns:
+        Un objeto graphviz.Digraph representando el árbol, o None si no hay datos.
+    """
+    try:
+        import graphviz
+    except ImportError:
+        st.error("La biblioteca 'graphviz' de Python no está instalada. Por favor, instálala (`pip install graphviz`).")
+        st.error("También necesitas instalar el software Graphviz en tu sistema: https://graphviz.org/download/")
+        return None
+
+    # Crear un nuevo grafo dirigido
     dot = graphviz.Digraph('Parse Tree', format='png')
-    
-    # Configure for a clean, hierarchical tree layout with increased spacing
-    dot.attr(rankdir='TB')  # Top to bottom
-    dot.attr('node', shape='circle', style='filled', color='black', fillcolor='lightblue', 
-             fontname='Arial', height='0.6', width='0.6', fixedsize='true')
+
+    # Configurar atributos para mejor espaciado y apariencia
+    dot.attr(rankdir='TB')  # Dirección de arriba a abajo
+    dot.attr('node', shape='circle', style='filled', fontname='Arial', fontsize='10')
     dot.attr('edge', arrowhead='normal', color='black')
-    # Increase spacing between nodes to prevent overlap
-    dot.attr('graph', ranksep='0.8', nodesep='0.5', overlap='false', splines='true')
-    
-    # Add title
-    dot.attr(label='Visualización del Árbol Sintáctico', labelloc='t', fontsize='20')
-    
-    # Track all actions: both rule applications and token matches
-    all_actions = []
+    # Aumentar separación para prevenir solapamientos
+    dot.attr('graph', ranksep='0.6', nodesep='0.5', overlap='false', splines='true') # Ajusta ranksep/nodesep si es necesario
+
+    # --- Construcción del Árbol Interno ---
+    rule_applications = []
     for step in parse_steps:
         action = step.get('accion', '')
         if action.startswith('Aplicar regla:'):
             rule = action.replace('Aplicar regla: ', '')
-            left_side, right_side = rule.split('->')
-            all_actions.append(('rule', left_side.strip(), right_side.strip()))
-        elif action.startswith('Match:'):
-            token = action.replace('Match: ', '')
-            all_actions.append(('match', token))
-    
-    # Initialize tracking variables
-    node_counter = 0
-    node_map = {}  # Maps symbols to their node IDs
-    parent_stack = []
-    terminal_nodes = []  # To track terminal nodes in order they are matched
-    
-    # Find the start symbol (from the first rule application)
-    start_symbol = None
-    for action_type, *args in all_actions:
-        if action_type == 'rule':
-            start_symbol = args[0]
-            break
-    
-    if not start_symbol:
-        return dot  # Empty tree if no rules found
-    
-    # Create root node
-    root_id = f"node_{node_counter}"
-    node_counter += 1
-    dot.node(root_id, start_symbol)
-    parent_stack.append((root_id, start_symbol))
-    
-    # Process all actions in order
-    for action_type, *args in all_actions:
-        if action_type == 'rule':
-            left_side, right_side = args
-            
-            # Find and remove the non-terminal being expanded from the stack
-            parent_id = None
-            parent_idx = -1
-            for idx, (node_id, symbol) in enumerate(parent_stack):
-                if symbol == left_side:
-                    parent_id = node_id
-                    parent_idx = idx
-                    break
-            
-            if parent_id is None:
-                continue  # Skip if parent not found
-            
-            # Remove the expanded non-terminal
-            parent_stack.pop(parent_idx)
-            
-            # Process the right side of the production
-            symbols = right_side.split()
-            if right_side == 'ε':  # Special case for epsilon
-                symbols = ['ε']
-            
-            # Add child nodes in reverse order to stack (for left-to-right processing)
-            children_ids = []
-            for symbol in symbols:
-                child_id = f"node_{node_counter}"
-                node_counter += 1
-                
-                # Add node and edge
-                dot.node(child_id, symbol)
-                dot.edge(parent_id, child_id)
-                children_ids.append(child_id)
-                
-                # Add to stack in reverse order for left-to-right expansions
-                if symbol[0].isupper() or "'" in symbol:  # Non-terminal
-                    parent_stack.append((child_id, symbol))
-                elif symbol != 'ε':  # Terminal but not epsilon
-                    terminal_nodes.append((child_id, symbol))
-    
-    # Use subgraphs to ensure terminals are aligned at the bottom
-    with dot.subgraph() as s:
-        s.attr(rank='same')
-        for node_id, _ in terminal_nodes:
-            s.node(node_id)
-    
+            try:
+                left, right = rule.split('->')
+                # Guardar la regla para procesarla después
+                rule_applications.append({'left': left.strip(), 'right': right.strip()})
+            except ValueError:
+                st.warning(f"Formato de regla inesperado, omitiendo: {rule}")
+                continue
+
+    if not rule_applications:
+        st.warning("No se encontraron reglas aplicadas en los pasos de parseo.")
+        # Devolver un grafo vacío pero utilizable
+        dot.node("empty", "No hay reglas para visualizar")
+        return dot
+
+    # Nodo interno para construir el árbol
+    class TreeNode:
+        _id_counter = 0
+        def __init__(self, symbol: str, is_terminal: bool = False):
+            self.symbol = symbol
+            self.children: List['TreeNode'] = []
+            self.is_terminal = is_terminal
+            # ID único para cada nodo del árbol interno, útil para Graphviz
+            self.unique_id = f"treenode_{TreeNode._id_counter}"
+            TreeNode._id_counter += 1
+
+    start_symbol = rule_applications[0]['left']
+    root = TreeNode(start_symbol)
+
+    # Cola (FIFO) de nodos no terminales pendientes de expansión
+    # Se asume que las reglas en parse_steps están en orden de expansión (ej. preorden)
+    unexpanded_queue: List[TreeNode] = [root]
+
+    # Procesar cada regla para construir la estructura del árbol
+    for rule in rule_applications:
+        left_symbol = rule['left']
+        right_symbols_str = rule['right']
+
+        if not unexpanded_queue:
+            st.warning(f"Se intentó aplicar la regla '{left_symbol} -> {right_symbols_str}' pero no hay nodos no terminales para expandir.")
+            break # Detener si la cola está vacía inesperadamente
+
+        # Encontrar el *próximo* nodo en la cola que coincida con left_symbol
+        node_to_expand = None
+        found_index = -1
+        for i, node in enumerate(unexpanded_queue):
+             if node.symbol == left_symbol:
+                 node_to_expand = node
+                 found_index = i
+                 break # Encontrado el primer nodo correspondiente
+
+        if node_to_expand is None:
+             # Esto puede pasar si el orden de parse_steps no coincide con la expansión FIFO
+             st.warning(f"No se encontró un nodo '{left_symbol}' listo para expandir en la cola para la regla '{left_symbol} -> {right_symbols_str}'. El orden de 'parse_steps' podría ser incorrecto para esta lógica.")
+             continue # Saltar esta regla si no encontramos un padre adecuado
+
+        # Eliminar el nodo expandido de la cola
+        unexpanded_queue.pop(found_index)
+
+        # Añadir hijos según la parte derecha de la regla
+        right_symbols = right_symbols_str.split()
+        new_children_non_terminals = []
+        for symbol in right_symbols:
+            symbol_clean = symbol.strip()
+            # IGNORAR producciones epsilon (tanto 'ε' como 'eps')
+            if symbol_clean in ['ε', 'eps']:
+                continue
+
+            # Determinar si es terminal (simplista: no empieza con mayúscula ni tiene comilla)
+            # Ajusta esta lógica si tus no terminales/terminales siguen otras convenciones
+            is_terminal = not (symbol_clean and (symbol_clean[0].isupper() or "'" in symbol_clean))
+
+            child = TreeNode(symbol_clean, is_terminal=is_terminal)
+            node_to_expand.children.append(child)
+
+            # Si el hijo es no terminal, se añadirá a la cola para futura expansión
+            if not is_terminal:
+                new_children_non_terminals.append(child)
+
+        # Añadir los nuevos nodos no terminales al PRINCIPIO de la cola encontrada (simula profundidad)
+        # O al final para anchura. La elección depende de cómo se generen los `parse_steps`.
+        # Usaremos inserción al principio (posición `found_index`) para mantener un orden más local.
+        for i, child_node in enumerate(new_children_non_terminals):
+            unexpanded_queue.insert(found_index + i, child_node)
+
+
+    # --- Construcción del Grafo Graphviz desde el Árbol Interno ---
+    terminal_node_ids = []
+
+    def add_to_graphviz(node: TreeNode):
+        """ Función recursiva para añadir nodos y arcos a Graphviz """
+        node_id = node.unique_id # Usar el ID único del TreeNode
+
+        # Determinar color
+        if node.is_terminal:
+            fillcolor = 'lightgreen'
+            terminal_node_ids.append(node_id)
+        else:
+            fillcolor = 'lightblue'
+
+        # Añadir nodo al grafo Graphviz
+        dot.node(node_id, label=node.symbol, fillcolor=fillcolor)
+
+        # Añadir arcos a los hijos
+        for child in node.children:
+            child_id = child.unique_id
+            dot.edge(node_id, child_id)
+            # Llamada recursiva para los hijos
+            add_to_graphviz(child)
+
+    # Iniciar la construcción desde la raíz
+    TreeNode._id_counter = 0 # Reiniciar contador si se llama múltiples veces
+    add_to_graphviz(root)
+
+    # Opcional: Forzar que los terminales estén en el mismo nivel inferior
+    if terminal_node_ids:
+        with dot.subgraph() as s:
+            s.attr(rank='same')
+            for term_id in terminal_node_ids:
+                s.node(term_id) # Solo necesita incluir los nodos en el subgrafo con rank=same
+
     return dot
 
 # Main program
