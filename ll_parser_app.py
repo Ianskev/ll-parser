@@ -388,153 +388,149 @@ def create_enhanced_ll1_table(df):
 
 def create_fallback_tree_visualization(parse_steps: List[Dict[str, Any]]):
     """
-    Crea una visualización del árbol usando NetworkX y Matplotlib.
-    El layout puede tener solapamientos si Graphviz no está disponible.
+    Crea una visualización del árbol de derivación jerárquica usando NetworkX y Matplotlib.
     """
-    actions: List[Tuple[str, ...]] = []
+    # Extraer reglas (excluyendo epsilons)
+    rules = []
     for step in parse_steps:
         action = step.get("accion", "")
         if action.startswith("Aplicar regla:"):
             rule = action.replace("Aplicar regla: ", "")
             try:
                 left, right = rule.split("->")
-                # IGNORAR producciones epsilon (tanto 'ε' como 'eps')
+                # Omitir producciones epsilon
                 if right.strip() not in ["ε", "eps"]:
-                    actions.append(("rule", left.strip(), right.strip()))
+                    rules.append((left.strip(), right.strip()))
             except ValueError:
-                 st.warning(f"Formato de regla inesperado, omitiendo: {rule}")
-                 continue
-        # Podrías usar 'Match' si necesitaras info de tokens, pero no se usa aquí
-
-    if not actions:
-        st.warning("No hay suficientes datos de reglas para generar el árbol de derivación.")
+                continue
+    
+    if not rules:
+        st.warning("No hay suficientes reglas para generar el árbol de derivación.")
         return
-
+    
+    # Crear un grafo dirigido (pero lo construiremos como un árbol)
     G = nx.DiGraph()
+    
+    # Variables para el seguimiento del árbol
+    root_symbol = rules[0][0]  # La primera regla indica el símbolo inicial
     node_counter = 0
-    parent_stack: List[Tuple[str, str]] = [] # (node_id, symbol)
-
-    # Encontrar símbolo inicial (primera regla encontrada)
-    start_symbol = None
-    for action_data in actions:
-        if action_data[0] == "rule":
-            start_symbol = action_data[1]
-            break
-
-    if not start_symbol:
-        st.warning("No se pudo determinar el símbolo inicial.")
-        return
-
+    node_symbols = {}  # Mapeo de ID a símbolo
+    node_types = {}    # Mapeo de ID a tipo (terminal/no-terminal)
+    
+    # Crear nodo raíz
     root_id = f"node_{node_counter}"
-    G.add_node(root_id, label=start_symbol, type="non-terminal")
-    parent_stack.append((root_id, start_symbol))
+    G.add_node(root_id)
+    node_symbols[root_id] = root_symbol
+    node_types[root_id] = "non-terminal"
     node_counter += 1
-
-    processed_rules = 0
-    while processed_rules < len(actions):
-        action_type, *args = actions[processed_rules]
-
-        if action_type != "rule":
-             processed_rules += 1
-             continue # Solo procesamos reglas para construir la estructura
-
-        left, right = args
-        parent_id = None
-        parent_idx = -1
-
-        # Buscar el primer padre disponible en la pila que coincida
-        # ¡¡Advertencia!! Esta lógica asume un orden específico en 'actions'
-        for idx, (node_id, symbol) in enumerate(reversed(parent_stack)): # Buscar desde el más reciente
-             if symbol == left:
-                 parent_id = node_id
-                 # El índice es desde el final, convertir a índice desde el principio
-                 parent_idx = len(parent_stack) - 1 - idx
-                 break
-
-        if parent_id is not None:
-            # Eliminar padre de la pila
-            parent_node_id, parent_symbol = parent_stack.pop(parent_idx)
-
-            right_symbols = right.split()
-            new_children_non_terminals = []
-
-            for symbol in reversed(right_symbols): # Procesar de derecha a izquierda para apilar correctamente
-                symbol_clean = symbol.strip()
-                if symbol_clean in ["ε", "eps"]: # Ya filtrado antes, pero doble check
-                    continue
-
-                child_id = f"node_{node_counter}"
-                node_counter += 1
-
-                is_terminal = not (symbol_clean and (symbol_clean[0].isupper() or "'" in symbol_clean))
-                node_type = "terminal" if is_terminal else "non-terminal"
-
-                G.add_node(child_id, label=symbol_clean, type=node_type)
-                G.add_edge(parent_node_id, child_id) # El padre correcto
-
-                if node_type == "non-terminal":
-                     # Añadir a una lista temporal para insertar en la pila
-                     new_children_non_terminals.append((child_id, symbol_clean))
-
-            # Insertar los nuevos no terminales en la pila en la posición donde estaba el padre
-            # El orden de inserción debe ser el inverso al que aparecen en la regla (izq a der)
-            for child_data in reversed(new_children_non_terminals):
-                 parent_stack.insert(parent_idx, child_data)
-
-            processed_rules += 1 # Avanzar solo si se procesó la regla
-        else:
-            # Si no se encuentra un padre, puede indicar un problema en el orden
-            # o que necesitamos procesar otra regla primero. Por simplicidad,
-            # aquí podríamos saltar o advertir. Moveremos esta regla al final
-            # para intentarla después (estrategia simple de reordenamiento).
-            st.warning(f"No se encontró padre '{left}' en la pila para la regla. Reintentando más tarde.")
-            rule_to_retry = actions.pop(processed_rules)
-            actions.append(rule_to_retry)
-            # Para evitar bucles infinitos si una regla nunca encuentra padre:
-            # Podríamos añadir un contador de reintentos o una lógica más compleja.
-            # Por ahora, si la longitud no cambia después de un ciclo, paramos.
-            # (Se necesita una lógica más robusta para manejar esto bien)
-            pass # Permitir que el bucle continúe
-
-    # --- Visualización con NetworkX/Matplotlib ---
-    plt.figure(figsize=(14, 9)) # Más grande
-    plt.title("Árbol de Derivación (Fallback Layout)", fontsize=16)
-
-    pos = None
+    
+    # Diccionario para seguimiento de nodos no terminales pendientes
+    # Mapea símbolo a lista de IDs de nodos
+    pending = {root_symbol: [root_id]}
+    
+    # Procesar cada regla para construir el árbol
+    for left, right in rules:
+        # Verificar si este no terminal está pendiente
+        if left not in pending or not pending[left]:
+            continue
+        
+        # Obtener el primer nodo pendiente de este símbolo
+        parent_id = pending[left].pop(0)
+        
+        # Procesar cada símbolo en la parte derecha
+        symbols = right.split()
+        for symbol in symbols:
+            # Omitir epsilon
+            if symbol in ["ε", "eps"]:
+                continue
+            
+            # Crear nodo para este símbolo
+            child_id = f"node_{node_counter}"
+            node_counter += 1
+            
+            # Determinar si es terminal
+            is_terminal = not (symbol[0].isupper() or "'" in symbol)
+            
+            # Agregar nodo y arista
+            G.add_node(child_id)
+            G.add_edge(parent_id, child_id)
+            node_symbols[child_id] = symbol
+            node_types[child_id] = "terminal" if is_terminal else "non-terminal"
+            
+            # Si es no terminal, agregar a pendientes
+            if not is_terminal:
+                if symbol not in pending:
+                    pending[symbol] = []
+                pending[symbol].append(child_id)
+    
+    # Crear layout jerárquico
+    plt.figure(figsize=(12, 8))
+    plt.title("Árbol de Derivación", fontsize=16)
+    
     try:
-        # Intentar usar Graphviz para el layout (requiere pygraphviz o pydot)
-        pos = nx.drawing.nx_agraph.graphviz_layout(G, prog="dot")
-        st.info("Layout generado usando Graphviz/dot.")
-    except ImportError:
-         st.warning("No se encontró 'pygraphviz' o 'pydot'. Usando layout spring_layout (puede no ser jerárquico).")
-         st.warning("Para un mejor layout jerárquico, instala Graphviz y 'pip install pygraphviz' o 'pip install pydot'.")
-         # Fallback a un layout menos ideal si graphviz_layout falla
-         pos = nx.spring_layout(G, k=0.5, iterations=50) # Ajusta k para espaciado
-    except Exception as e:
-         st.warning(f"Fallo al usar graphviz_layout: {e}. Usando layout spring_layout.")
-         pos = nx.spring_layout(G, k=0.5, iterations=50)
-
-    node_labels = {node: G.nodes[node]['label'] for node in G.nodes()}
+        # Intentar usar el algoritmo de graphviz a través de pygraphviz
+        pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
+        st.info("Layout generado con algoritmo de Graphviz - layout jerárquico.")
+    except:
+        # Si falla, crear un layout personalizado para asegurar la jerarquía
+        st.warning("Usando layout jerárquico personalizado (sin Graphviz).")
+        
+        # Función para crear un layout jerárquico personalizado
+        def hierarchical_pos(G, root=None, width=1., vert_gap=0.4, vert_loc=0, xcenter=0.5):
+            """
+            Crea un layout jerárquico posicionando los nodos por nivel.
+            """
+            if root is None:
+                # Encontrar la raíz - nodo con grado de entrada 0
+                roots = [n for n, d in G.in_degree() if d == 0]
+                if roots:
+                    root = roots[0]
+                else:
+                    # Si no hay raíz, usar el primer nodo
+                    root = list(G.nodes())[0]
+            
+            def _hierarchy_pos(G, root, width=1., vert_gap=0.4, vert_loc=0, xcenter=0.5, pos=None, parent=None):
+                if pos is None:
+                    pos = {root: (xcenter, vert_loc)}
+                else:
+                    pos[root] = (xcenter, vert_loc)
+                
+                children = list(G.neighbors(root))
+                if not children:
+                    return pos
+                
+                # Distribuir los hijos uniformemente
+                dx = width / len(children)
+                nextx = xcenter - width/2 - dx/2
+                
+                for child in children:
+                    nextx += dx
+                    pos = _hierarchy_pos(G, child, width=dx, vert_gap=vert_gap, 
+                                        vert_loc=vert_loc-vert_gap, xcenter=nextx, pos=pos, parent=root)
+                return pos
+            
+            return _hierarchy_pos(G, root, width=width, vert_gap=vert_gap, vert_loc=vert_loc, xcenter=xcenter)
+        
+        pos = hierarchical_pos(G)
+    
+    # Preparar los atributos visuales
     node_colors = []
     for node in G.nodes():
-        node_type = G.nodes[node].get('type', 'unknown')
-        if node_type == 'non-terminal':
-            node_colors.append('lightblue')
-        elif node_type == 'terminal':
+        if node_types[node] == "terminal":
             node_colors.append('lightgreen')
         else:
-            node_colors.append('lightgray')
-
-    nx.draw_networkx_nodes(G, pos, node_size=2000, node_color=node_colors, edgecolors='black', node_shape='o')
-    nx.draw_networkx_edges(G, pos, arrows=True, width=1.5, arrowsize=15, node_size=2000) # Pasar node_size para ajustar flechas
-    nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=10, font_weight='bold') # Reducir tamaño fuente
-
+            node_colors.append('lightblue')
+    
+    # Dibujar los nodos con etiquetas (símbolos)
+    nx.draw_networkx_nodes(G, pos, node_size=1800, node_color=node_colors, edgecolors='black')
+    nx.draw_networkx_labels(G, pos, labels=node_symbols, font_weight='bold', font_size=11)
+    nx.draw_networkx_edges(G, pos, arrows=False, width=1.5)
+    
     plt.axis('off')
     plt.tight_layout()
     st.pyplot(plt)
-    plt.close() # Cerrar la figura para liberar memoria
-
-    st.caption("Árbol de derivación generado con NetworkX. Instala Graphviz para un mejor layout.")
+    
+    st.caption("Árbol de derivación para la gramática y cadena de entrada analizada")
 
 def main():
     # Setup session state to store editor content
@@ -743,10 +739,6 @@ F -> ( E ) | id"""
                     else:
                         st.success("✅ La cadena fue aceptada")
                     
-                    # Parse the tables in a more visually appealing format
-                    with st.expander("Ver resultado completo (texto plano)", expanded=False):
-                        st.text(result)
-                    
                     # Create tabs for each type of analysis table
                     results_tab1, results_tab2, results_tab3 = st.tabs(["Tabla de Símbolos", "Análisis de la Cadena", "Tabla de Análisis LL(1)"])
                     
@@ -821,6 +813,15 @@ F -> ( E ) | id"""
                         st.session_state.input_text_analyzed = input_text
                         st.session_state.grammar_text_analyzed = grammar_text
                         st.info("👉 Vaya a la pestaña 'Árbol de Derivación' para ver la representación visual del análisis")
+                    
+                    # Add download button at the end
+                    st.download_button(
+                        label="📥 Descargar resultado completo",
+                        data=result,
+                        file_name="analisis_ll1.txt",
+                        mime="text/plain",
+                        help="Descargar el resultado completo del análisis"
+                    )
                     
                     # Limpiar archivos temporales
                     os.unlink(grammar_file)
