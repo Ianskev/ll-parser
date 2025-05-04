@@ -389,6 +389,7 @@ def create_enhanced_ll1_table(df):
 def create_fallback_tree_visualization(parse_steps: List[Dict[str, Any]]):
     """
     Crea una visualización del árbol de derivación jerárquica usando NetworkX y Matplotlib.
+    Sigue las transiciones exactas del análisis de la cadena.
     """
     # Extraer reglas (excluyendo epsilons)
     rules = []
@@ -398,9 +399,8 @@ def create_fallback_tree_visualization(parse_steps: List[Dict[str, Any]]):
             rule = action.replace("Aplicar regla: ", "")
             try:
                 left, right = rule.split("->")
-                # Omitir producciones epsilon
-                if right.strip() not in ["ε", "eps"]:
-                    rules.append((left.strip(), right.strip()))
+                # No omitimos reglas epsilon aquí para mantener la secuencia correcta
+                rules.append((left.strip(), right.strip()))
             except ValueError:
                 continue
     
@@ -416,52 +416,68 @@ def create_fallback_tree_visualization(parse_steps: List[Dict[str, Any]]):
     node_counter = 0
     node_symbols = {}  # Mapeo de ID a símbolo
     node_types = {}    # Mapeo de ID a tipo (terminal/no-terminal)
+    node_expansions = {}  # Mapeo de nodos no terminales a su estado de expansión
     
     # Crear nodo raíz
     root_id = f"node_{node_counter}"
     G.add_node(root_id)
     node_symbols[root_id] = root_symbol
     node_types[root_id] = "non-terminal"
+    node_expansions[root_id] = False  # Aún no expandido
     node_counter += 1
     
-    # Diccionario para seguimiento de nodos no terminales pendientes
-    # Mapea símbolo a lista de IDs de nodos
-    pending = {root_symbol: [root_id]}
+    # Seguimiento de la forma sentencial actual como lista de IDs de nodos
+    sentential_form = [root_id]
     
-    # Procesar cada regla para construir el árbol
+    # Procesar cada regla en el orden de aplicación
     for left, right in rules:
-        # Verificar si este no terminal está pendiente
-        if left not in pending or not pending[left]:
+        # Encontrar el no terminal más a la izquierda sin expandir que coincida con 'left'
+        expand_index = None
+        for i, node_id in enumerate(sentential_form):
+            if (node_id in node_symbols and 
+                node_symbols[node_id] == left and 
+                node_id in node_expansions and 
+                not node_expansions[node_id]):
+                expand_index = i
+                break
+        
+        if expand_index is None:
+            # No se encontró un no terminal sin expandir que coincida, omitir esta regla
             continue
         
-        # Obtener el primer nodo pendiente de este símbolo
-        parent_id = pending[left].pop(0)
+        # Marcar este no terminal como expandido
+        current_node_id = sentential_form[expand_index]
+        node_expansions[current_node_id] = True
         
-        # Procesar cada símbolo en la parte derecha
-        symbols = right.split()
-        for symbol in symbols:
-            # Omitir epsilon
-            if symbol in ["ε", "eps"]:
-                continue
-            
-            # Crear nodo para este símbolo
-            child_id = f"node_{node_counter}"
+        # Si es epsilon, simplemente marcamos el nodo como expandido pero no agregamos hijos
+        # (No mostramos el epsilon en el árbol)
+        if right.strip() in ["ε", "eps"]:
+            continue
+        
+        # Manejar el lado derecho de la regla
+        right_symbols = right.split()
+        new_node_ids = []
+        
+        # Procesar cada símbolo en el lado derecho de la regla
+        for symbol in right_symbols:
+            new_id = f"node_{node_counter}"
             node_counter += 1
+            G.add_node(new_id)
+            G.add_edge(current_node_id, new_id)
+            node_symbols[new_id] = symbol
             
-            # Determinar si es terminal
+            # Determinar si el símbolo es terminal o no terminal
             is_terminal = not (symbol[0].isupper() or "'" in symbol)
+            node_types[new_id] = "terminal" if is_terminal else "non-terminal"
             
-            # Agregar nodo y arista
-            G.add_node(child_id)
-            G.add_edge(parent_id, child_id)
-            node_symbols[child_id] = symbol
-            node_types[child_id] = "terminal" if is_terminal else "non-terminal"
-            
-            # Si es no terminal, agregar a pendientes
             if not is_terminal:
-                if symbol not in pending:
-                    pending[symbol] = []
-                pending[symbol].append(child_id)
+                # Agregar al seguimiento de expansión
+                node_expansions[new_id] = False
+            
+            new_node_ids.append(new_id)
+        
+        # Actualizar la forma sentencial - reemplazar el no terminal expandido con su expansión
+        sentential_form = sentential_form[:expand_index] + new_node_ids + sentential_form[expand_index+1:]
     
     # Crear layout jerárquico
     plt.figure(figsize=(12, 8))
@@ -471,7 +487,6 @@ def create_fallback_tree_visualization(parse_steps: List[Dict[str, Any]]):
         # Intentar usar el algoritmo de graphviz a través de pygraphviz
         pos = nx.nx_agraph.graphviz_layout(G, prog="dot")
     except:
-        
         # Función para crear un layout jerárquico personalizado
         def hierarchical_pos(G, root=None, width=1., vert_gap=0.4, vert_loc=0, xcenter=0.5):
             """
