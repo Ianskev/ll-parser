@@ -17,6 +17,11 @@ def extract_grammar(file_path):
             lines = archivo.readlines()
         return [line for line in lines if line.strip() and not line.strip().startswith('/')]
 
+def is_uppercase_identifier(symbol):
+    """Check if symbol is a valid uppercase identifier (non-terminal)"""
+    # A valid non-terminal starts with uppercase and can contain alphanumeric chars
+    return symbol and symbol[0].isupper() and all(c.isalnum() or c == "'" for c in symbol)
+
 def tokenize(input_str, terminales):
     """Convert input string to tokens based on grammar terminals"""
     tokens = []
@@ -406,7 +411,7 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
         variables = []
         terminales = []
         
-        # First, identify variables and terminals
+        # First, extract all non-terminals from the left side of rules
         for line in grammar_lines:
             line = line.strip()
             if not line or '->' not in line:
@@ -415,9 +420,19 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
             parts = line.split('->')
             var = parts[0].strip()
             
-            # Don't add the start symbol to variables list to avoid duplication
+            # Add each non-terminal as a complete symbol
             if var not in variables and var not in start:
                 variables.append(var)
+        
+        # Now process rules to extract terminals and create rule entries
+        for line in grammar_lines:
+            line = line.strip()
+            if not line or '->' not in line:
+                continue
+                
+            parts = line.split('->')
+            var = parts[0].strip()
+            
             # Extract alternatives
             right_side = parts[1].strip()
             alternatives = [alt.strip() for alt in right_side.split('|')]
@@ -430,55 +445,51 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
                     reglas[regla_id] = {'Izq': var, 'Der': [epsilon]}
                     continue
                 
-                # Process multi-character symbols
-                i = 0
+                # Split by whitespace to identify complete symbols
                 symbols = []
-                while i < len(alt):
-                    if alt[i].isspace():
-                        i += 1
-                        continue
-                        
-                    # Handle variables with apostrophe (like E')
-                    if i+1 < len(alt) and alt[i+1] == "'":
-                        symbol = alt[i:i+2]
-                        if symbol not in variables:
-                            variables.append(symbol)
-                        symbols.append(symbol)
-                        i += 2
-                        continue
-                    
-                    # General case: handle any multi-character terminal (sequence of lowercase letters)
-                    if alt[i].islower():
-                        start_pos = i
-                        while i < len(alt) and alt[i].islower():
-                            i += 1
-                        symbol = alt[start_pos:i]
-                        if symbol not in terminales:
-                            terminales.append(symbol)
-                        symbols.append(symbol)
-                        continue
-                    
-                    # Handle special characters
-                    if alt[i] in '+-*/()':
-                        if alt[i] not in terminales:
-                            terminales.append(alt[i])
-                        symbols.append(alt[i])
-                        i += 1
-                        continue
-                        
-                    # Handle other symbols
-                    symbol = alt[i]
-                    if symbol.isupper():
-                        if symbol not in variables:
-                            variables.append(symbol)
+                parts = alt.split()
+                
+                for part in parts:
+                    # Check if this is a known non-terminal
+                    if part in variables or part in start:
+                        symbols.append(part)
+                    # Check if it's a terminal with apostrophe (like E')
+                    elif len(part) > 1 and part[-1] == "'" and part[:-1] in variables:
+                        if part not in variables:
+                            variables.append(part)
+                        symbols.append(part)
+                    # Check if it's a terminal-like token that should be left whole
+                    elif is_uppercase_identifier(part):
+                        if part not in variables:
+                            variables.append(part)
+                        symbols.append(part)
+                    # Otherwise it must be a terminal
                     else:
-                        if symbol not in terminales and symbol != epsilon:
-                            terminales.append(symbol)
-                    symbols.append(symbol)
-                    i += 1
-                    
+                        # Special case: if term is a multi-character word that's not a keyword
+                        if part.isalpha() and part.islower() and part not in ['struct', 'int', 'char', 'bool', 'float']:
+                            if part not in terminales:
+                                terminales.append(part)
+                            symbols.append(part)
+                        else:
+                            # Check for special terminal keywords
+                            if part in ['struct', 'int', 'char', 'bool', 'float', 'id']:
+                                if part not in terminales:
+                                    terminales.append(part)
+                                symbols.append(part)
+                            # Handle special characters
+                            elif part in ['{', '}', ';', '*']:
+                                if part not in terminales:
+                                    terminales.append(part)
+                                symbols.append(part)
+                            # Handle other multi-character terminals
+                            else:
+                                # Keep multi-character terminals as a single token
+                                if part not in terminales:
+                                    terminales.append(part)
+                                symbols.append(part)
+                
                 reglas[regla_id] = {'Izq': var, 'Der': symbols}
-        
+
         # Initialize grammar structure
         grammar = {}
         

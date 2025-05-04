@@ -131,37 +131,85 @@ def parse_ll1_table(result_text):
     
     # Parse the header row first
     header_line = data_lines[0].strip()
-    terminals = []
     
-    # Extract terminals from header, respecting fixed column width
-    col_width = 20
-    for i in range(1, len(header_line) // col_width + 1):
-        start = i * col_width
-        end = start + col_width
-        if start < len(header_line):
-            terminal = header_line[start:end].strip()
-            if terminal:
-                terminals.append(terminal)
+    # Dynamically determine column width based on the header content
+    # Look for patterns of spaces (3 or more) to identify column boundaries
+    col_positions = [0]  # Start with the first column at position 0
+    
+    # Find column boundaries by looking for groups of spaces
+    i = 0
+    while i < len(header_line):
+        if header_line[i] == ' ':
+            # Found a space, check if it's the start of a group of spaces
+            space_count = 0
+            while i < len(header_line) and header_line[i] == ' ':
+                space_count += 1
+                i += 1
+            # If we found a group of 3 or more spaces, consider it a column boundary
+            if space_count >= 3:
+                col_positions.append(i)
+        else:
+            i += 1
+    
+    # If we couldn't find column boundaries with spaces, fall back to fixed width
+    if len(col_positions) <= 1:
+        col_width = 20
+        col_positions = [0]  # Start with position 0
+        for i in range(1, (len(header_line) // col_width) + 1):
+            col_positions.append(i * col_width)
+    
+    # Extract terminals from header using the column positions
+    terminals = []
+    for i in range(len(col_positions) - 1):
+        start = col_positions[i]
+        end = col_positions[i+1]
+        terminal = header_line[start:end].strip()
+        if terminal and terminal != "Non-Terminal" and not terminal.startswith("Non"):
+            # Handle special characters by removing any escaping
+            terminal = terminal.replace('\\', '')
+            terminals.append(terminal)
+    
+    # Add the last terminal if there's content after the last column position
+    if col_positions and col_positions[-1] < len(header_line):
+        last_terminal = header_line[col_positions[-1]:].strip()
+        if last_terminal:
+            terminals.append(last_terminal)
     
     # Create DataFrame structure with non-terminals as rows and terminals as columns
     data = []
     
     # Process each row (non-terminal)
     for line in data_lines[1:]:
+        if not line.strip() or all(c == '-' for c in line):
+            continue
+            
         row_data = {}
         
         # Extract non-terminal (first column)
-        non_terminal = line[:col_width].strip()
+        if col_positions and len(col_positions) > 1:
+            non_terminal = line[:col_positions[1]].strip()
+        else:
+            non_terminal = line[:20].strip()  # Fall back to fixed width if needed
+            
         row_data["Non-Terminal"] = non_terminal
         
         # Extract productions for each terminal
         for i, terminal in enumerate(terminals):
-            col_start = (i + 1) * col_width
-            col_end = col_start + col_width
+            col_idx = i + 1  # Skip the first column (non-terminal)
+            if col_idx < len(col_positions) - 1:
+                start = col_positions[col_idx]
+                end = col_positions[col_idx + 1]
+            elif col_idx == len(col_positions) - 1:
+                start = col_positions[col_idx]
+                end = len(line)
+            else:
+                # Fallback for cases where the column structure is unclear
+                start = (i + 1) * 20 if i < len(terminals) else len(line)
+                end = (i + 2) * 20 if i + 1 < len(terminals) else len(line)
             
-            if col_start < len(line):
-                cell = line[col_start:col_end].strip()
-                row_data[terminal] = cell
+            if start < len(line):
+                cell = line[start:end].strip()
+                row_data[terminal] = cell if cell else "-"
             else:
                 row_data[terminal] = "-"
         
