@@ -5,7 +5,184 @@ import base64
 import shutil
 import matplotlib.pyplot as plt
 import networkx as nx
+import pandas as pd
+import re
 from LL_parser import parse_grammar_and_analyze, eliminate_left_recursion, left_factorization, generate_parse_tree
+
+# Helper functions to parse the analysis output
+def parse_symbol_table(result_text):
+    """Extract and parse the symbol table from the result text"""
+    # Find the table of symbols section
+    symbol_match = re.search(r"TABLA DE SÍMBOLOS\n(.*?)(?=\n\n)", result_text, re.DOTALL)
+    if not symbol_match:
+        return None
+    
+    symbol_table_text = symbol_match.group(1)
+    lines = symbol_table_text.strip().split('\n')
+    
+    # Extract header
+    header_match = re.match(r"Símbolo\s+Tipo\s+NULLABLE\s+FIRST\s+FOLLOW", lines[0])
+    if not header_match:
+        # Try to find header line
+        for i, line in enumerate(lines):
+            if "Símbolo" in line and "Tipo" in line and "NULLABLE" in line:
+                header_line = i
+                break
+        else:
+            return None
+    
+    # Skip header and separator lines
+    data_lines = [line for line in lines[2:] if line.strip() and not all(c == '-' for c in line.strip())]
+    
+    # Parse data lines
+    data = []
+    for line in data_lines:
+        # Split by multiple spaces and filter out empty strings
+        parts = [p for p in re.split(r'\s{2,}', line.strip()) if p]
+        if len(parts) >= 5:
+            data.append({
+                "Símbolo": parts[0],
+                "Tipo": parts[1],
+                "NULLABLE": parts[2],
+                "FIRST": parts[3],
+                "FOLLOW": parts[4]
+            })
+    
+    return pd.DataFrame(data)
+
+def parse_chain_analysis(result_text):
+    """Extract and parse the chain analysis from the result text"""
+    # Find the analysis chain section
+    analysis_match = re.search(r"ANALISIS DE LA CADENA\n(.*?)(?=\n\nResultado)", result_text, re.DOTALL)
+    if not analysis_match:
+        return None
+    
+    analysis_text = analysis_match.group(1)
+    lines = analysis_text.strip().split('\n')
+    
+    # Extract header and find header positions
+    header_line = lines[0]
+    sep_line = lines[1]
+    
+    # Parse header columns based on the separator line
+    col_positions = [0]
+    for i, char in enumerate(sep_line):
+        if char == '-' and sep_line[i-1] != '-':
+            col_positions.append(i)
+        if char != '-' and sep_line[i-1] == '-':
+            col_positions.append(i)
+    
+    # Remove duplicates and sort
+    col_positions = sorted(set(col_positions))
+    
+    # Extract column names from the header
+    col_names = []
+    for i in range(len(col_positions)-1):
+        start = col_positions[i]
+        end = col_positions[i+1]
+        col_name = header_line[start:end].strip()
+        col_names.append(col_name)
+    # Add the last column
+    col_names.append(header_line[col_positions[-1]:].strip())
+    
+    # Extract data rows
+    data = []
+    for line in lines[2:]:
+        if line.strip() and not all(c == '-' for c in line):
+            row_data = {}
+            for i in range(len(col_positions)-1):
+                start = col_positions[i]
+                end = col_positions[i+1] if i+1 < len(col_positions) else len(line)
+                value = line[start:end].strip()
+                row_data[col_names[i]] = value
+            # Add the last column if exists
+            if len(col_positions) > 0:
+                row_data[col_names[-1]] = line[col_positions[-1]:].strip()
+            data.append(row_data)
+    
+    return pd.DataFrame(data)
+
+def parse_ll1_table(result_text):
+    """Extract and parse the LL(1) analysis table from the result text"""
+    # Find the LL(1) table section
+    ll1_match = re.search(r"TABLA DE ANÁLISIS LL\(1\)(.*?)(?=\n\n)", result_text, re.DOTALL)
+    if not ll1_match:
+        return None
+    
+    ll1_table_text = ll1_match.group(1)
+    lines = ll1_table_text.strip().split('\n')
+    
+    # Skip separator lines
+    data_lines = [line for line in lines if line.strip() and not all(c == '-' for c in line.strip())]
+    
+    if len(data_lines) < 2:
+        return None
+    
+    # Extract headers (terminal symbols)
+    headers = data_lines[0].strip().split()
+    
+    # Parse data rows
+    data = []
+    for line in data_lines[1:]:
+        parts = line.strip().split()
+        if not parts:
+            continue
+        
+        # First part is the non-terminal
+        non_terminal = parts[0]
+        
+        # Create a row dict with the non-terminal as index
+        row_data = {"Non-Terminal": non_terminal}
+        
+        # Add productions for each terminal
+        for i, header in enumerate(headers):
+            if i+1 < len(parts):
+                row_data[header] = parts[i+1]
+            else:
+                row_data[header] = ""
+        
+        data.append(row_data)
+    
+    return pd.DataFrame(data)
+
+def style_dataframe(df, type_col=None):
+    """Add styling to the dataframe for better visualization"""
+    # Define CSS styles
+    styles = [
+        dict(selector="th", props=[("font-weight", "bold"), 
+                                 ("background-color", "#4CAF50"),
+                                 ("color", "white"),
+                                 ("text-align", "center"),
+                                 ("padding", "10px")]),
+        dict(selector="td", props=[("padding", "8px"), 
+                                 ("text-align", "center"),
+                                 ("border", "1px solid #ddd")]),
+        dict(selector="tr:nth-child(even)", props=[("background-color", "#f2f2f2")])
+    ]
+    
+    # Apply styling
+    styled_df = df.style.set_table_styles(styles).set_properties(**{
+        'border': '1px solid #ddd',
+        'text-align': 'center',
+    })
+    
+    # Highlight non-terminals, terminals and special symbols if type column exists
+    if type_col and type_col in df.columns:
+        def highlight_row(row):
+            # Get background color based on the type value
+            if row[type_col] == 'V':
+                bg_color = '#E3F2FD'  # Light blue for non-terminals
+            elif row[type_col] == 'T':
+                bg_color = '#F1F8E9'  # Light green for terminals
+            else:
+                bg_color = '#FFF3E0'  # Light orange for special symbols
+                
+            # Return a list with the same background color for all cells in the row
+            return ['background-color: ' + bg_color] * len(row)
+            
+        styled_df = styled_df.apply(highlight_row, axis=1)
+    
+    return styled_df
 
 def main():
     # Setup session state to store editor content
@@ -214,8 +391,39 @@ F -> ( E ) | id"""
                     else:
                         st.success("✅ La cadena fue aceptada")
                     
-                    with st.container():
+                    # Parse and display the tables in a more visually appealing format
+                    with st.expander("Ver resultado completo (texto plano)", expanded=False):
                         st.text(result)
+                    
+                    # Parse and display the Symbol Table with a fallback option
+                    symbol_df = parse_symbol_table(result)
+                    if symbol_df is not None:
+                        st.markdown('<p class="medium-font">Tabla de Símbolos</p>', unsafe_allow_html=True)
+                        try:
+                            st.dataframe(style_dataframe(symbol_df, 'Tipo'), use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
+                            st.dataframe(symbol_df, use_container_width=True)  # Fallback to unstyle
+                    
+                    # Parse and display the Chain Analysis with a fallback option
+                    chain_df = parse_chain_analysis(result)
+                    if chain_df is not None:
+                        st.markdown('<p class="medium-font">Análisis de la Cadena</p>', unsafe_allow_html=True)
+                        try:
+                            st.dataframe(style_dataframe(chain_df), use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
+                            st.dataframe(chain_df, use_container_width=True)  # Fallback to unstyle
+                    
+                    # Parse and display the LL(1) Table with a fallback option
+                    ll1_df = parse_ll1_table(result)
+                    if ll1_df is not None:
+                        st.markdown('<p class="medium-font">Tabla de Análisis LL(1)</p>', unsafe_allow_html=True)
+                        try:
+                            st.dataframe(style_dataframe(ll1_df), use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
+                            st.dataframe(ll1_df, use_container_width=True)  # Fallback to unstyle
                     
                     # Botón para descargar resultados
                     st.download_button(
