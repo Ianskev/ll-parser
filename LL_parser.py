@@ -3,7 +3,9 @@ import json
 import io
 import graphviz
 import copy
-from typing import List, Dict, Any, Optional
+import csv
+import tempfile
+from typing import List, Dict, Any, Optional, Tuple
 import streamlit as st
 
 def extract_grammar(file_path):
@@ -647,13 +649,22 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
                         if r not in tabla[var][follow_symbol]:
                             tabla[var][follow_symbol].append(r)
         
-        # Preparar salida para análisis
+        # Display grammar information and parsing table
         output = io.StringIO()
         
-        # Display grammar information and parsing table
+        # Create temporary CSV files for the tables
+        symbol_table_csv = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        analysis_table_csv = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        ll1_table_csv = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv', encoding='utf-8')
+        
+        # Write the symbol table to CSV
+        symbol_writer = csv.writer(symbol_table_csv)
+        symbol_writer.writerow(['Símbolo', 'Tipo', 'NULLABLE', 'FIRST', 'FOLLOW'])
+        
+        # Text output for symbol table
         output.write("TABLA DE SÍMBOLOS\n\n")
-        output.write(f"{'Símbolo':<10} {'Tipo':<8} {'NULLABLE':<10} {'FIRST':<20} {'FOLLOW':<20}\n")
-        output.write("-" * 70 + "\n")
+        output.write(f"{'Símbolo':<15} {'Tipo':<10} {'NULLABLE':<12} {'FIRST':<25} {'FOLLOW':<50}\n")
+        output.write("-" * 90 + "\n")
         
         for simbolo, datos in grammar.items():
             if simbolo == epsilon:  # Skip epsilon in symbol table display
@@ -661,15 +672,39 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
             tipo = datos['tipo']
             nullable = "Sí" if datos.get('nullable', False) else "No"
             
-            # Show epsilon as 'ε' in FIRST sets for display
+            # Show epsilon as 'ε' in FIRST sets for display and wrap in curly braces
             first_set = datos.get('first', [])
             first = ", ".join(['ε' if f == epsilon else f for f in first_set])
+            if first:
+                first = "{" + first + "}"
+            else:
+                first = "-"
             
-            follow = ", ".join(datos.get('follow', [])) if 'follow' in datos else "-"
-            output.write(f"{simbolo:<10} {tipo:<8} {nullable:<10} {first:<20} {follow:<20}\n")
+            # Wrap FOLLOW set in curly braces
+            follow_set = datos.get('follow', [])
+            if follow_set:
+                follow = "{" + ", ".join(follow_set) + "}"
+            else:
+                follow = "-"
+                
+            # Write to text output
+            output.write(f"{simbolo:<15} {tipo:<10} {nullable:<12} {first:<25} {follow:<50}\n")
+            
+            # Write to CSV
+            symbol_writer.writerow([simbolo, tipo, nullable, first, follow])
         
+        symbol_table_csv.close()
+        
+        # Write the LL(1) analysis table to CSV
+        ll1_writer = csv.writer(ll1_table_csv)
+        
+        # First row: column headers (terminals)
+        headers = ['Non-Terminal'] + [t for t in terminales + ["$"] if t != epsilon]
+        ll1_writer.writerow(headers)
+        
+        # Text output for LL(1) table
         output.write("\n\nTABLA DE ANÁLISIS LL(1)\n")
-        output.write(f"{'Non-Terminal':20}")
+        output.write(f"{'Non-Terminal':<20}")
         
         # Display only actual terminals (not epsilon) in the table header
         display_terminals = [t for t in terminales + ["$"] if t != epsilon]
@@ -686,7 +721,12 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
                 continue
             displayed_symbols.append(nt)
             
+            # Write to text output
             output.write(f"{nt:20}")
+            
+            # Prepare row for CSV
+            row_data = [nt]
+            
             for t in display_terminals:  # Only iterate over actual terminals
                 producciones = tabla[nt][t]
                 if producciones:
@@ -698,9 +738,16 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
                     else:
                         production_str = "-"
                     output.write(f"{production_str:<20}")
+                    row_data.append(production_str)
                 else:
                     output.write(f"{'-':<20}")
+                    row_data.append("-")
             output.write("\n")
+            
+            # Write row to CSV
+            ll1_writer.writerow(row_data)
+        
+        ll1_table_csv.close()
         
         # Parse input string
         try:
@@ -713,6 +760,10 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
         output.write("\n\nANALISIS DE LA CADENA\n")
         success, steps = explore_parse(input_text, grammar, tabla, start, terminales)
         
+        # Write the chain analysis to CSV
+        analysis_writer = csv.writer(analysis_table_csv)
+        analysis_writer.writerow(['PILA', 'ENTRADA', 'ACCIÓN'])
+        
         # Print the parsing steps in tabular format
         output.write(f"{'PILA':<30} {'ENTRADA':<30} {'ACCIÓN':<50}\n")
         output.write("-" * 110 + "\n")
@@ -720,11 +771,14 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
         # Print the parsing steps
         for step in steps:
             output.write(f"{step['pila']:<30} {step['entrada']:<30} {step['accion']:<50}\n")
+            analysis_writer.writerow([step['pila'], step['entrada'], step['accion']])
+        
+        analysis_table_csv.close()
         
         output.write("\nResultado del análisis: " + ("ACEPTADA" if success else "RECHAZADA") + "\n")
         
         if return_steps:
-            return output.getvalue(), steps
+            return output.getvalue(), steps, (symbol_table_csv.name, ll1_table_csv.name, analysis_table_csv.name)
         return output.getvalue()
     except Exception as e:
         return f"Error en el análisis: {str(e)}\n{type(e).__name__}: {e}"

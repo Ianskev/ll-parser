@@ -7,9 +7,42 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import pandas as pd
 import re
+import csv
 from LL_parser import parse_grammar_and_analyze, eliminate_left_recursion, left_factorization, generate_parse_tree
 from typing import List, Dict, Any, Optional, Tuple
 import streamlit.components.v1 as components
+
+# Helper functions to read CSV tables
+def read_symbol_table_csv(csv_file_path):
+    """Read the symbol table from a CSV file"""
+    try:
+        df = pd.read_csv(csv_file_path)
+        # Filter out non-meaningful rows
+        df = df[df['Símbolo'].notna()]
+        return df
+    except Exception as e:
+        st.warning(f"Error reading symbol table CSV: {str(e)}")
+        return None
+
+def read_ll1_table_csv(csv_file_path):
+    """Read the LL(1) analysis table from a CSV file"""
+    try:
+        df = pd.read_csv(csv_file_path)
+        # Filter out empty rows
+        df = df[df['Non-Terminal'].notna()]
+        return df
+    except Exception as e:
+        st.warning(f"Error reading LL(1) table CSV: {str(e)}")
+        return None
+
+def read_chain_analysis_csv(csv_file_path):
+    """Read the chain analysis from a CSV file"""
+    try:
+        df = pd.read_csv(csv_file_path)
+        return df
+    except Exception as e:
+        st.warning(f"Error reading chain analysis CSV: {str(e)}")
+        return None
 
 # Helper functions to parse the analysis output
 def parse_symbol_table(result_text):
@@ -39,25 +72,51 @@ def parse_symbol_table(result_text):
     # Parse data lines
     data = []
     for line in data_lines:
-        # Split by multiple spaces and filter out empty strings
-        parts = [p for p in re.split(r'\s{2,}', line.strip()) if p]
-        if len(parts) >= 5:
-            # Format FIRST and FOLLOW with curly braces if they're not empty
-            first = parts[3]
-            follow = parts[4]
+        # Use a more reliable way to extract columns based on fixed positions
+        if len(line) < 15:  # Skip short lines
+            continue
             
-            if first and first != "-":
-                first = "{" + first + "}"
+        # Extract columns based on positions observed in the formatted output
+        try:
+            simbolo = line[:15].strip()
+            tipo = line[15:25].strip()
+            nullable = line[25:37].strip()
             
-            if follow and follow != "-":
-                follow = "{" + follow + "}"
+            # For FIRST and FOLLOW, extract everything and look for the braces pattern
+            rest_of_line = line[37:].strip()
+            
+            # Find FIRST (inside curly braces)
+            first_match = re.search(r'(\{[^}]*\}|-)', rest_of_line)
+            if first_match:
+                first = first_match.group(0)
+                # Extract FOLLOW after FIRST
+                follow_match = re.search(r'(\{[^}]*\}|-)', rest_of_line[first_match.end():])
+                if follow_match:
+                    follow = follow_match.group(0)
+                else:
+                    follow = "-"
+            else:
+                first = "-"
+                follow = "-"
                 
             data.append({
-                "Símbolo": parts[0],
-                "Tipo": parts[1],
+                "Símbolo": simbolo,
+                "Tipo": tipo,
+                "NULLABLE": nullable,
                 "FIRST": first,
                 "FOLLOW": follow
             })
+        except Exception:
+            # If extraction fails, try the original splitting approach
+            parts = [p for p in re.split(r'\s{2,}', line.strip()) if p]
+            if len(parts) >= 4:
+                data.append({
+                    "Símbolo": parts[0],
+                    "Tipo": parts[1],
+                    "NULLABLE": parts[2] if len(parts) > 2 else "-",
+                    "FIRST": parts[3] if len(parts) > 3 else "-",
+                    "FOLLOW": parts[4] if len(parts) > 4 else "-"
+                })
     
     return pd.DataFrame(data)
 
@@ -132,80 +191,40 @@ def parse_ll1_table(result_text):
     # Parse the header row first
     header_line = data_lines[0].strip()
     
-    # Dynamically determine column width based on the header content
-    # Look for patterns of spaces (3 or more) to identify column boundaries
-    col_positions = [0]  # Start with the first column at position 0
+    # More reliable column detection based on fixed width
+    col_width = 20  # Each column is 20 chars wide as specified in LL_parser.py
     
-    # Find column boundaries by looking for groups of spaces
-    i = 0
-    while i < len(header_line):
-        if header_line[i] == ' ':
-            # Found a space, check if it's the start of a group of spaces
-            space_count = 0
-            while i < len(header_line) and header_line[i] == ' ':
-                space_count += 1
-                i += 1
-            # If we found a group of 3 or more spaces, consider it a column boundary
-            if space_count >= 3:
-                col_positions.append(i)
-        else:
-            i += 1
-    
-    # If we couldn't find column boundaries with spaces, fall back to fixed width
-    if len(col_positions) <= 1:
-        col_width = 20
-        col_positions = [0]  # Start with position 0
-        for i in range(1, (len(header_line) // col_width) + 1):
-            col_positions.append(i * col_width)
-    
-    # Extract terminals from header using the column positions
+    # Extract terminals from header based on fixed column width
     terminals = []
-    for i in range(len(col_positions) - 1):
-        start = col_positions[i]
-        end = col_positions[i+1]
-        terminal = header_line[start:end].strip()
-        if terminal and terminal != "Non-Terminal" and not terminal.startswith("Non"):
-            # Handle special characters by removing any escaping
-            terminal = terminal.replace('\\', '')
-            terminals.append(terminal)
+    first_col = header_line[:col_width].strip()  # First column is "Non-Terminal"
     
-    # Add the last terminal if there's content after the last column position
-    if col_positions and col_positions[-1] < len(header_line):
-        last_terminal = header_line[col_positions[-1]:].strip()
-        if last_terminal:
-            terminals.append(last_terminal)
+    # Extract remaining headers in fixed-width chunks
+    for i in range(1, (len(header_line) // col_width) + 1):
+        start = i * col_width
+        end = min(start + col_width, len(header_line))
+        terminal = header_line[start:end].strip()
+        if terminal:
+            terminals.append(terminal)
     
     # Create DataFrame structure with non-terminals as rows and terminals as columns
     data = []
     
     # Process each row (non-terminal)
     for line in data_lines[1:]:
-        if not line.strip() or all(c == '-' for c in line):
+        if not line.strip() or all(c == '-' for c in line) or len(line) < col_width:
             continue
             
         row_data = {}
         
         # Extract non-terminal (first column)
-        if col_positions and len(col_positions) > 1:
-            non_terminal = line[:col_positions[1]].strip()
-        else:
-            non_terminal = line[:20].strip()  # Fall back to fixed width if needed
-            
+        non_terminal = line[:col_width].strip()
         row_data["Non-Terminal"] = non_terminal
         
-        # Extract productions for each terminal
+        # Extract productions for each terminal based on fixed width
         for i, terminal in enumerate(terminals):
             col_idx = i + 1  # Skip the first column (non-terminal)
-            if col_idx < len(col_positions) - 1:
-                start = col_positions[col_idx]
-                end = col_positions[col_idx + 1]
-            elif col_idx == len(col_positions) - 1:
-                start = col_positions[col_idx]
-                end = len(line)
-            else:
-                # Fallback for cases where the column structure is unclear
-                start = (i + 1) * 20 if i < len(terminals) else len(line)
-                end = (i + 2) * 20 if i + 1 < len(terminals) else len(line)
+            start = col_idx * col_width
+            end = min(start + col_width, len(line))
             
             if start < len(line):
                 cell = line[start:end].strip()
@@ -764,7 +783,10 @@ F -> ( E ) | id"""
                     
                     with st.spinner('Analizando gramática y cadena de entrada...'):
                         # Ejecutar análisis
-                        result, parse_steps = parse_grammar_and_analyze(grammar_file, input_file, return_steps=True)
+                        result, parse_steps, csv_files = parse_grammar_and_analyze(grammar_file, input_file, return_steps=True)
+                        
+                        # Unpack CSV file paths
+                        symbol_table_csv, ll1_table_csv, analysis_table_csv = csv_files
                     
                     st.markdown('<p class="result-header">Resultado del Análisis</p>', unsafe_allow_html=True)
                     
@@ -779,7 +801,13 @@ F -> ( E ) | id"""
                     
                     # Tab 1: Display the Symbol Table (non-terminal symbols only)
                     with results_tab1:
-                        symbol_df = parse_symbol_table(result)
+                        # Try to read from CSV first
+                        symbol_df = read_symbol_table_csv(symbol_table_csv)
+                        
+                        # If CSV reading fails, fall back to text parsing
+                        if symbol_df is None:
+                            symbol_df = parse_symbol_table(result)
+                            
                         if symbol_df is not None:
                             # Filter out terminal symbols and select only needed columns
                             non_terminals_df = symbol_df[symbol_df["Tipo"].isin(["I", "V"])][["Símbolo", "Tipo", "FIRST", "FOLLOW"]]
@@ -800,7 +828,13 @@ F -> ( E ) | id"""
                     
                     # Tab 2: Display the Chain Analysis
                     with results_tab2:
-                        chain_df = parse_chain_analysis(result)
+                        # Try to read from CSV first
+                        chain_df = read_chain_analysis_csv(analysis_table_csv)
+                        
+                        # If CSV reading fails, fall back to text parsing
+                        if chain_df is None:
+                            chain_df = parse_chain_analysis(result)
+                            
                         if chain_df is not None:
                             try:
                                 # Find the action column more safely
@@ -822,7 +856,13 @@ F -> ( E ) | id"""
                     
                     # Tab 3: Display the LL(1) Table with improved formatting
                     with results_tab3:
-                        ll1_df = parse_ll1_table(result)
+                        # Try to read from CSV first
+                        ll1_df = read_ll1_table_csv(ll1_table_csv)
+                        
+                        # If CSV reading fails, fall back to text parsing
+                        if ll1_df is None:
+                            ll1_df = parse_ll1_table(result)
+                            
                         if ll1_df is not None:
                             try:
                                 # Try to display with enhanced styling
@@ -861,6 +901,9 @@ F -> ( E ) | id"""
                     # Limpiar archivos temporales
                     os.unlink(grammar_file)
                     os.unlink(input_file)
+                    os.unlink(symbol_table_csv)
+                    os.unlink(ll1_table_csv)
+                    os.unlink(analysis_table_csv)
                 
                 except Exception as e:
                     st.error(f"Error en el análisis: {str(e)}")
@@ -978,3 +1021,4 @@ C -> c C | ε
 
 if __name__ == "__main__":
     main()
+
