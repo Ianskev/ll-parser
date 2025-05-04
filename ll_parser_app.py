@@ -554,6 +554,8 @@ T' -> * F T' | ε
 F -> ( E ) | id"""
     if 'input_text' not in st.session_state:
         st.session_state.input_text = "id + id * id"
+    if 'cursor_pos' not in st.session_state:
+        st.session_state.cursor_pos = 0
 
     # Configuración de página con tema y estilo
     st.set_page_config(
@@ -576,14 +578,61 @@ F -> ( E ) | id"""
     .sidebar-subtitle {font-size:18px; font-weight:bold; color:#455A64; margin-top:15px}
     button.keyboard-btn {margin: 2px; padding: 2px 8px;}
     </style>
+    
+    <script>
+    // Function to track cursor position in text area
+    document.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            const textareas = document.querySelectorAll('textarea');
+            textareas.forEach(function(textarea) {
+                if (textarea.labels && textarea.labels[0] && textarea.labels[0].innerText.includes('Ingrese su gramática')) {
+                    textarea.addEventListener('click', function(e) {
+                        const cursorPosition = textarea.selectionStart;
+                        window.parent.postMessage({
+                            type: 'cursor-position',
+                            position: cursorPosition
+                        }, '*');
+                    });
+                    
+                    textarea.addEventListener('keyup', function(e) {
+                        const cursorPosition = textarea.selectionStart;
+                        window.parent.postMessage({
+                            type: 'cursor-position',
+                            position: cursorPosition
+                        }, '*');
+                    });
+                }
+            });
+        }, 1000);
+    });
+    </script>
+    """, unsafe_allow_html=True)
+    
+    # Add Streamlit component to listen for messages from JavaScript
+    components_placeholder = st.empty()
+    components_placeholder.markdown("""
+    <script>
+    window.addEventListener('message', function(e) {
+        if (e.data.type === 'cursor-position') {
+            window.parent.postMessage({
+                type: 'streamlit:setComponentValue',
+                value: e.data.position
+            }, '*');
+        }
+    });
+    </script>
     """, unsafe_allow_html=True)
 
-    # Helper functions for virtual keyboard
+    # Helper function for virtual keyboard
     def add_to_grammar(symbol):
-        st.session_state.grammar_text += symbol
-    
-    def add_to_input(symbol):
-        st.session_state.input_text += symbol
+        if 'cursor_pos' in st.session_state and st.session_state.cursor_pos is not None:
+            current_text = st.session_state.grammar_text
+            cursor_pos = st.session_state.cursor_pos
+            # Insert the symbol at cursor position
+            new_text = current_text[:cursor_pos] + symbol + current_text[cursor_pos:]
+            st.session_state.grammar_text = new_text
+            # Update cursor position to after the inserted symbol
+            st.session_state.cursor_pos = cursor_pos + len(symbol)
 
     # Encabezado principal
     st.markdown('<p class="big-font">Analizador Sintáctico LL(1)</p>', unsafe_allow_html=True)
@@ -641,22 +690,12 @@ F -> ( E ) | id"""
             default=["Eliminar recursividad por izquierda"]
         )
     
-    # Input string options
+    # Input string options - simplified to just manual and file upload
     st.sidebar.markdown('<p class="sidebar-subtitle">Cadena de entrada</p>', unsafe_allow_html=True)
-    input_string_method = st.sidebar.radio("Método de entrada para cadena:", ["Ejemplos predefinidos", "Entrada manual", "Subir archivo"])
+    input_string_method = st.sidebar.radio("Método de entrada para cadena:", ["Entrada manual", "Subir archivo"])
     
     input_text = ""
-    if input_string_method == "Ejemplos predefinidos":
-        input_examples = {
-            "Ejemplo 1": "id + id * id",
-            "Ejemplo 2": "( id )",
-            "Ejemplo 3": "id + id + id",
-            "Ejemplo 4": "id * id * id"
-        }
-        selected_example = st.sidebar.selectbox("Seleccione un ejemplo:", list(input_examples.keys()))
-        input_text = input_examples[selected_example]
-        st.session_state.input_text = input_text
-    elif input_string_method == "Entrada manual":
+    if input_string_method == "Entrada manual":
         input_text = st.sidebar.text_area(
             "Ingrese la cadena de entrada:", 
             value=st.session_state.input_text, 
@@ -664,22 +703,6 @@ F -> ( E ) | id"""
             key="input_editor",
             on_change=lambda: setattr(st.session_state, 'input_text', st.session_state.input_editor)
         )
-        
-        # Virtual keyboard for input
-        st.sidebar.markdown('<p class="sidebar-subtitle">Teclado virtual para entrada</p>', unsafe_allow_html=True)
-        col1, col2, col3 = st.sidebar.columns(3)
-        with col1:
-            st.button("id", on_click=add_to_input, args=["id "], key="input_id_btn", use_container_width=True)
-        with col2:
-            st.button("+", on_click=add_to_input, args=[" + "], key="input_plus_btn", use_container_width=True)
-        with col3:
-            st.button("*", on_click=add_to_input, args=[" * "], key="input_star_btn", use_container_width=True)
-        
-        col4, col5 = st.sidebar.columns(2)
-        with col4:
-            st.button("(", on_click=add_to_input, args=[" ( "], key="input_lparen_btn", use_container_width=True)
-        with col5:
-            st.button(")", on_click=add_to_input, args=[" ) "], key="input_rparen_btn", use_container_width=True)
     else:
         uploaded_input = st.sidebar.file_uploader("Subir archivo de entrada (.txt)", type=["txt"])
         if uploaded_input:
