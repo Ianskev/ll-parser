@@ -127,6 +127,6 @@ La aplicación se abrirá automáticamente en tu navegador web predeterminado.
   - 🟦 Azul: no terminales.
   - 🟩 Verde: terminales.
 
-
+*Desarrollado por * **Ian Kevin Condori Flores**    
 *Desarrollado para el curso de Compiladores - UTEC*  
 *2025*  
