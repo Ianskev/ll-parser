@@ -813,157 +813,180 @@ Pointer -> * id"""
                     # Check if grammar has issues before analyzing
                     has_left_recursion, needs_factorization = check_grammar_issues(grammar_text)
                     
+                    # Instead of returning, use a flag to control the flow
+                    should_continue_analysis = True
+                    
                     if has_left_recursion or needs_factorization:
-                        st.warning("⚠️ La gramática ingresada puede no ser compatible con LL(1):")
+                        should_continue_analysis = False
+                        st.warning("⚠️ La gramática ingresada no es compatible con LL(1):")
                         if has_left_recursion:
                             st.warning("• Se detectó recursividad por izquierda")
                         if needs_factorization:
                             st.warning("• Se detectó la necesidad de factorización por izquierda")
-                        st.info("👉 Vaya a la pestaña 'Optimizar Gramática' para transformar su gramática a una forma compatible con LL(1)")
                         
                         # Copy the grammar to the optimization tab for convenience
                         st.session_state.optimization_grammar = grammar_text
-                    
-                    # Crear archivos temporales para la gramática y la entrada
-                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as f:
-                        safe_grammar = grammar_text.replace('ε', 'eps')
-                        f.write(safe_grammar)
-                        grammar_file = f.name
                         
-                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as f:
-                        f.write(input_text)
-                        input_file = f.name
-                    
-                    with st.spinner('Analizando gramática y cadena de entrada...'):
-                        # Ejecutar análisis
-                        result, parse_steps, csv_files = parse_grammar_and_analyze(grammar_file, input_file, return_steps=True)
+                        st.error("❌ No se puede analizar una cadena con una gramática que no es LL(1)")
+                        st.info("👉 Vaya a la pestaña 'Optimizar Gramática' para transformar su gramática a una forma compatible con LL(1)")
                         
-                        # Unpack CSV file paths
-                        symbol_table_csv, ll1_table_csv, analysis_table_csv = csv_files
+                        # Add buttons for navigation to the Optimize tab
+                        optimize_col1, optimize_col2 = st.columns(2)
+                        with optimize_col1:
+                            st.button("Ir a Optimizar Gramática", on_click=lambda: None, key="goto_optimize_btn")
+                        with optimize_col2:
+                            if st.button("Más información", key="more_info_btn"):
+                                st.markdown("""
+                                **¿Por qué mi gramática no es LL(1)?**
+
+                                * **Recursividad por izquierda**: No puede haber producciones como `A → A α` donde A deriva a sí mismo como primer símbolo
+                                * **Ambigüedad de prefijos**: No puede haber producciones como `A → α β | α γ` con prefijos comunes
+                                
+                                La pestaña de optimización transformará automáticamente su gramática a formato LL(1).
+                                """)
                     
-                    st.markdown('<p class="result-header">Resultado del Análisis</p>', unsafe_allow_html=True)
-                    
-                    # Display analysis failure specific messages
-                    if "RECHAZADA" in result:
-                        st.error("❌ La cadena fue rechazada")
-                        
-                        # Check for specific error patterns
-                        if "No hay producción para" in result:
-                            st.error("Error de análisis LL(1): No se encontró una producción adecuada en la tabla.")
-                            if has_left_recursion or needs_factorization:
-                                st.info("Esto puede deberse a que la gramática no está en formato LL(1). Consulte la pestaña 'Optimizar Gramática'.")
-                    else:
-                        st.success("✅ La cadena fue aceptada")
-                    
-                    # Create tabs for each type of analysis table
-                    results_tab1, results_tab2, results_tab3 = st.tabs(["Tabla de Símbolos", "Análisis de la Cadena", "Tabla de Análisis LL(1)"])
-                    
-                    # Tab 1: Display the Symbol Table (non-terminal symbols only)
-                    with results_tab1:
-                        # Try to read from CSV first
-                        symbol_df = read_symbol_table_csv(symbol_table_csv)
-                        
-                        # If CSV reading fails, fall back to text parsing
-                        if symbol_df is None:
-                            symbol_df = parse_symbol_table(result)
+                    if should_continue_analysis:
+                        # Proceed with analysis only if grammar is LL(1) compatible
+                        # Crear archivos temporales para la gramática y la entrada
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as f:
+                            safe_grammar = grammar_text.replace('ε', 'eps')
+                            f.write(safe_grammar)
+                            grammar_file = f.name
                             
-                        if symbol_df is not None:
-                            # Filter out terminal symbols and select only needed columns
-                            non_terminals_df = symbol_df[symbol_df["Tipo"].isin(["I", "V"])][["Símbolo", "Tipo", "FIRST", "FOLLOW"]]
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as f:
+                            f.write(input_text)
+                            input_file = f.name
+                        
+                        with st.spinner('Analizando gramática y cadena de entrada...'):
+                            # Ejecutar análisis
+                            result, parse_steps, csv_files = parse_grammar_and_analyze(grammar_file, input_file, return_steps=True)
                             
-                            if not non_terminals_df.empty:
+                            # Unpack CSV file paths
+                            symbol_table_csv, ll1_table_csv, analysis_table_csv = csv_files
+                        
+                        st.markdown('<p class="result-header">Resultado del Análisis</p>', unsafe_allow_html=True)
+                        
+                        # Display analysis failure specific messages
+                        if "RECHAZADA" in result:
+                            st.error("❌ La cadena fue rechazada")
+                            
+                            # Check for specific error patterns
+                            if "No hay producción para" in result:
+                                st.error("Error de análisis LL(1): No se encontró una producción adecuada en la tabla.")
+                                if has_left_recursion or needs_factorization:
+                                    st.info("Esto puede deberse a que la gramática no está en formato LL(1). Consulte la pestaña 'Optimizar Gramática'.")
+                        else:
+                            st.success("✅ La cadena fue aceptada")
+                        
+                        # Create tabs for each type of analysis table
+                        results_tab1, results_tab2, results_tab3 = st.tabs(["Tabla de Símbolos", "Análisis de la Cadena", "Tabla de Análisis LL(1)"])
+                        
+                        # Tab 1: Display the Symbol Table (non-terminal symbols only)
+                        with results_tab1:
+                            # Try to read from CSV first
+                            symbol_df = read_symbol_table_csv(symbol_table_csv)
+                            
+                            # If CSV reading fails, fall back to text parsing
+                            if symbol_df is None:
+                                symbol_df = parse_symbol_table(result)
+                                
+                            if symbol_df is not None:
+                                # Filter out terminal symbols and select only needed columns
+                                non_terminals_df = symbol_df[symbol_df["Tipo"].isin(["I", "V"])][["Símbolo", "Tipo", "FIRST", "FOLLOW"]]
+                                
+                                if not non_terminals_df.empty:
+                                    try:
+                                        st.dataframe(
+                                            style_symbol_table(non_terminals_df),
+                                            use_container_width=True
+                                        )
+                                    except Exception as e:
+                                        st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
+                                        st.dataframe(non_terminals_df, use_container_width=True)  # Fallback
+                                else:
+                                    st.info("No se encontraron símbolos no terminales en la gramática.")
+                            else:
+                                st.warning("No se pudo extraer la tabla de símbolos del resultado.")
+                        
+                        # Tab 2: Display the Chain Analysis
+                        with results_tab2:
+                            # Try to read from CSV first
+                            chain_df = read_chain_analysis_csv(analysis_table_csv)
+                            
+                            # If CSV reading fails, fall back to text parsing
+                            if chain_df is None:
+                                chain_df = parse_chain_analysis(result)
+                                
+                            if chain_df is not None:
                                 try:
-                                    st.dataframe(
-                                        style_symbol_table(non_terminals_df),
-                                        use_container_width=True
-                                    )
+                                    # Find the action column more safely
+                                    action_column = None
+                                    for col in chain_df.columns:
+                                        if "ACCIÓN" in col or "ACCION" in col or "accion" in col.lower():
+                                            action_column = col
+                                            break
+                                    
+                                    if action_column:
+                                        st.dataframe(apply_enhanced_styling(chain_df, action_column), use_container_width=True)
+                                    else:
+                                        st.dataframe(apply_enhanced_styling(chain_df), use_container_width=True)
                                 except Exception as e:
                                     st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
-                                    st.dataframe(non_terminals_df, use_container_width=True)  # Fallback
+                                    st.dataframe(chain_df, use_container_width=True)  # Fallback
                             else:
-                                st.info("No se encontraron símbolos no terminales en la gramática.")
-                        else:
-                            st.warning("No se pudo extraer la tabla de símbolos del resultado.")
-                    
-                    # Tab 2: Display the Chain Analysis
-                    with results_tab2:
-                        # Try to read from CSV first
-                        chain_df = read_chain_analysis_csv(analysis_table_csv)
+                                st.warning("No se pudo extraer el análisis de la cadena del resultado.")
                         
-                        # If CSV reading fails, fall back to text parsing
-                        if chain_df is None:
-                            chain_df = parse_chain_analysis(result)
+                        # Tab 3: Display the LL(1) Table with improved formatting
+                        with results_tab3:
+                            # Try to read from CSV first
+                            ll1_df = read_ll1_table_csv(ll1_table_csv)
                             
-                        if chain_df is not None:
-                            try:
-                                # Find the action column more safely
-                                action_column = None
-                                for col in chain_df.columns:
-                                    if "ACCIÓN" in col or "ACCION" in col or "accion" in col.lower():
-                                        action_column = col
-                                        break
+                            # If CSV reading fails, fall back to text parsing
+                            if ll1_df is None:
+                                ll1_df = parse_ll1_table(result)
                                 
-                                if action_column:
-                                    st.dataframe(apply_enhanced_styling(chain_df, action_column), use_container_width=True)
-                                else:
-                                    st.dataframe(apply_enhanced_styling(chain_df), use_container_width=True)
-                            except Exception as e:
-                                st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
-                                st.dataframe(chain_df, use_container_width=True)  # Fallback
-                        else:
-                            st.warning("No se pudo extraer el análisis de la cadena del resultado.")
-                    
-                    # Tab 3: Display the LL(1) Table with improved formatting
-                    with results_tab3:
-                        # Try to read from CSV first
-                        ll1_df = read_ll1_table_csv(ll1_table_csv)
-                        
-                        # If CSV reading fails, fall back to text parsing
-                        if ll1_df is None:
-                            ll1_df = parse_ll1_table(result)
-                            
-                        if ll1_df is not None:
-                            try:
-                                # Try to display with enhanced styling
-                                st.dataframe(create_enhanced_ll1_table(ll1_df), use_container_width=True)
-                            except Exception as e:
-                                st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
+                            if ll1_df is not None:
                                 try:
-                                    # Fall back to basic display
-                                    st.table(ll1_df)
-                                except:
-                                    # Last resort: plain text display
-                                    ll1_match = re.search(r"TABLA DE ANÁLISIS LL\(1\)(.*?)(?=\n\n)", result, re.DOTALL)
-                                    if ll1_match:
-                                        st.text(ll1_match.group(1))
-                                    else:
-                                        st.warning("No se pudo extraer la tabla de análisis LL(1) del resultado.")
-                        else:
-                            st.warning("No se pudo extraer la tabla de análisis LL(1) del resultado.")
+                                    # Try to display with enhanced styling
+                                    st.dataframe(create_enhanced_ll1_table(ll1_df), use_container_width=True)
+                                except Exception as e:
+                                    st.warning(f"Error al aplicar estilos a la tabla: {str(e)}")
+                                    try:
+                                        # Fall back to basic display
+                                        st.table(ll1_df)
+                                    except:
+                                        # Last resort: plain text display
+                                        ll1_match = re.search(r"TABLA DE ANÁLISIS LL\(1\)(.*?)(?=\n\n)", result, re.DOTALL)
+                                        if ll1_match:
+                                            st.text(ll1_match.group(1))
+                                        else:
+                                            st.warning("No se pudo extraer la tabla de análisis LL(1) del resultado.")
+                            else:
+                                st.warning("No se pudo extraer la tabla de análisis LL(1) del resultado.")
+                        
+                        # Guardar los pasos de análisis para el árbol de derivación
+                        if "ACEPTADA" in result:
+                            st.session_state.parse_steps = parse_steps
+                            st.session_state.input_text_analyzed = input_text
+                            st.session_state.grammar_text_analyzed = grammar_text
+                            st.info("👉 Vaya a la pestaña 'Árbol de Derivación' para ver la representación visual del análisis")
+                        
+                        # Add download button at the end
+                        st.download_button(
+                            label="📥 Descargar resultado completo",
+                            data=result,
+                            file_name="analisis_ll1.txt",
+                            mime="text/plain",
+                            help="Descargar el resultado completo del análisis"
+                        )
+                        
+                        # Limpiar archivos temporales
+                        os.unlink(grammar_file)
+                        os.unlink(input_file)
+                        os.unlink(symbol_table_csv)
+                        os.unlink(ll1_table_csv)
+                        os.unlink(analysis_table_csv)
                     
-                    # Guardar los pasos de análisis para el árbol de derivación
-                    if "ACEPTADA" in result:
-                        st.session_state.parse_steps = parse_steps
-                        st.session_state.input_text_analyzed = input_text
-                        st.session_state.grammar_text_analyzed = grammar_text
-                        st.info("👉 Vaya a la pestaña 'Árbol de Derivación' para ver la representación visual del análisis")
-                    
-                    # Add download button at the end
-                    st.download_button(
-                        label="📥 Descargar resultado completo",
-                        data=result,
-                        file_name="analisis_ll1.txt",
-                        mime="text/plain",
-                        help="Descargar el resultado completo del análisis"
-                    )
-                    
-                    # Limpiar archivos temporales
-                    os.unlink(grammar_file)
-                    os.unlink(input_file)
-                    os.unlink(symbol_table_csv)
-                    os.unlink(ll1_table_csv)
-                    os.unlink(analysis_table_csv)
-                
                 except Exception as e:
                     st.error(f"Error en el análisis: {str(e)}")
                     # Suggest optimization if there's an error during analysis
