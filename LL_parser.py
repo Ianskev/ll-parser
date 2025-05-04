@@ -571,9 +571,9 @@ def parse_grammar_and_analyze(grammar_file="grammar.txt", input_file="input.txt"
             tipo = datos['tipo']
             nullable = "Sí" if datos.get('nullable', False) else "No"
             
-            # Exclude epsilon from FIRST sets for display
+            # Show epsilon as 'ε' in FIRST sets for display
             first_set = datos.get('first', [])
-            first = ", ".join([f for f in first_set if f != epsilon])
+            first = ", ".join(['ε' if f == epsilon else f for f in first_set])
             
             follow = ", ".join(datos.get('follow', [])) if 'follow' in datos else "-"
             output.write(f"{simbolo:<10} {tipo:<8} {nullable:<10} {first:<20} {follow:<20}\n")
