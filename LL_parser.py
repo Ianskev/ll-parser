@@ -188,61 +188,77 @@ def left_factorization(grammar_text):
     # Apply left factorization
     new_rules = {}
     for A, productions in rules.items():
-        # Group productions by common prefix
-        while True:
-            # Find common prefixes
-            prefixes = {}
-            for prod in productions:
-                prod_parts = prod.split()
-                if not prod_parts:
-                    if '' not in prefixes:
-                        prefixes[''] = []
-                    prefixes[''].append(prod)
-                    continue
-                    
-                prefix = prod_parts[0]
-                if prefix not in prefixes:
-                    prefixes[prefix] = []
-                prefixes[prefix].append(prod)
+        new_rules[A] = []
+        prods_to_check = productions.copy()
+        
+        while prods_to_check:
+            # Take the first production as reference
+            first_prod = prods_to_check[0]
+            first_parts = first_prod.split()
+            
+            # Find all productions that share a common prefix with the first one
+            matching_prods = [first_prod]
+            non_matching = []
+            
+            # Find the maximum common prefix length with all other productions
+            max_common_prefix_len = 0
+            
+            for prod in prods_to_check[1:]:
+                parts = prod.split()
+                
+                # Find common prefix length
+                common_len = 0
+                for i in range(min(len(first_parts), len(parts))):
+                    if first_parts[i] == parts[i]:
+                        common_len += 1
+                    else:
+                        break
+                
+                if common_len > 0:
+                    # This production shares a prefix with the first one
+                    matching_prods.append(prod)
+                    max_common_prefix_len = max(max_common_prefix_len, common_len)
+                else:
+                    # No common prefix
+                    non_matching.append(prod)
             
             # Check if we need to factorize
-            factorize = False
-            for prefix, prods in prefixes.items():
-                if len(prods) > 1:
-                    factorize = True
-                    break
-            
-            if not factorize:
-                break
+            if len(matching_prods) > 1 and max_common_prefix_len > 0:
+                # Extract the common prefix
+                common_prefix = ' '.join(first_parts[:max_common_prefix_len])
                 
-            # Apply factorization for the longest prefix
-            new_productions = []
-            for prefix, prods in list(prefixes.items()):
-                if len(prods) > 1:
-                    A_prime = f"{A}'"
-                    new_suffix = []
-                    
-                    for prod in prods:
-                        if prefix:
-                            suffix = prod[len(prefix):].strip()
-                            new_suffix.append(suffix if suffix else 'ε')
-                        else:
-                            new_suffix.append(prod)
-                    
-                    new_productions.append(f"{prefix} {A_prime}")
-                    
-                    if A_prime not in new_rules:
-                        new_rules[A_prime] = []
-                    new_rules[A_prime].extend(new_suffix)
-                    
-                    # Remove the factorized productions
-                    productions = [p for p in productions if p not in prods]
-                else:
-                    new_productions.extend(prods)
+                # Create a new non-terminal
+                A_prime = f"{A}'"
+                
+                # Verificar si el nombre ya existe en new_rules
+                # y solo añadir índice si es necesario
+                if A_prime in new_rules:
+                    i = 1
+                    while f"{A_prime}{i}" in new_rules:
+                        i += 1
+                    A_prime = f"{A_prime}{i}"
+                
+                # Create suffixes
+                suffixes = []
+                for prod in matching_prods:
+                    parts = prod.split()
+                    if len(parts) > max_common_prefix_len:
+                        suffix = ' '.join(parts[max_common_prefix_len:])
+                        suffixes.append(suffix)
+                    else:
+                        suffixes.append('ε')
+                
+                # Add the factorized production
+                new_rules[A].append(f"{common_prefix} {A_prime}")
+                
+                # Add the new non-terminal with its productions
+                new_rules[A_prime] = suffixes
+            else:
+                # No factorization needed for this production
+                new_rules[A].append(prods_to_check[0])
             
-            productions = new_productions
-        
-        new_rules[A] = productions
+            # Continue with the rest of productions
+            prods_to_check = non_matching
     
     # Convert back to grammar text
     result = []
